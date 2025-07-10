@@ -7,4 +7,3 @@ fastapi
 pytest
 
 pytest-asyncio
-
