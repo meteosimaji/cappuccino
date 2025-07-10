@@ -1,5 +1,6 @@
 import asyncio
 import json
+
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -139,4 +140,3 @@ class CappuccinoAgent:
                 await close_fn()
             else:
                 close_fn()
-
