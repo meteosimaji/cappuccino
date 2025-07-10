@@ -6,23 +6,23 @@ from tool_manager import ToolManager
 
 @pytest.mark.asyncio
 async def test_file_read_and_append(tmp_path):
-    tm = ToolManager(db_path=os.path.join(tmp_path, "db.sqlite"))
-    file_path = tmp_path / "sample.txt"
-    await asyncio.to_thread(file_path.write_text, "hello\n")
-    result = await tm.file_read(str(file_path))
-    assert "content" in result and result["content"] == "hello\n"
-    await tm.file_append_text(str(file_path), "world\n")
-    result = await tm.file_read(str(file_path))
-    assert result["content"] == "hello\nworld\n"
+    async with ToolManager(db_path=os.path.join(tmp_path, "db.sqlite")) as tm:
+        file_path = tmp_path / "sample.txt"
+        await asyncio.to_thread(file_path.write_text, "hello\n")
+        result = await tm.file_read(str(file_path))
+        assert "content" in result and result["content"] == "hello\n"
+        await tm.file_append_text(str(file_path), "world\n")
+        result = await tm.file_read(str(file_path))
+        assert result["content"] == "hello\nworld\n"
 
 @pytest.mark.asyncio
 async def test_shell_exec_and_wait():
-    tm = ToolManager(db_path=":memory:")
-    session_id = "test"
-    await tm.shell_exec("echo hello", session_id)
-    result = await tm.shell_wait(session_id)
-    assert result["returncode"] == 0
-    assert "hello" in result["stdout"]
+    async with ToolManager(db_path=":memory:") as tm:
+        session_id = "test"
+        await tm.shell_exec("echo hello", session_id)
+        result = await tm.shell_wait(session_id)
+        assert result["returncode"] == 0
+        assert "hello" in result["stdout"]
 
 
 @pytest.mark.asyncio

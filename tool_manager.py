@@ -22,6 +22,21 @@ class ToolManager:
         self.browser_url: str = ""
         self.service_processes: Dict[int, Any] = {}
 
+    async def __aenter__(self) -> "ToolManager":
+        """Open the database connection when entering the context."""
+        await self._get_db_connection()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        """Close the database connection on context exit."""
+        await self.close()
+
+    async def close(self) -> None:
+        """Explicitly close the database connection."""
+        if self.db_connection is not None:
+            await self.db_connection.close()
+            self.db_connection = None
+
     async def _get_db_connection(self) -> aiosqlite.Connection:
         if self.db_connection is None:
             self.db_connection = await aiosqlite.connect(self.db_path)
