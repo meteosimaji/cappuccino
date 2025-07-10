@@ -1,6 +1,4 @@
 import asyncio
-import os
-import json
 import logging
 import math
 import struct
@@ -18,6 +16,7 @@ class ToolExecutionError(Exception):
 
 
 logger = logging.getLogger(__name__)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -262,8 +261,10 @@ class ToolManager:
     # ------------------------------------------------------------------
     # File operations
     # ------------------------------------------------------------------
+
     @log_tool
     async def file_read(self, abs_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> Dict[str, Any]:
+
         """Read a text file and optionally limit lines."""
         try:
             abs_path = self._validate_path(abs_path)
