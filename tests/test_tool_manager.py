@@ -26,6 +26,7 @@ async def test_shell_exec_and_wait():
 
 
 @pytest.mark.asyncio
+
 async def test_media_generate_speech(tmp_path, monkeypatch):
     tm = ToolManager(db_path=":memory:")
     out_file = tmp_path / "speech.mp3"

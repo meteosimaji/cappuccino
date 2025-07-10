@@ -2,7 +2,11 @@ import asyncio
 import os
 import json
 import logging
-from typing import Any, Dict, Optional
+import math
+import struct
+import wave
+import sys
+from typing import Any, Dict, Optional, List
 
 import aiosqlite
 from PIL import Image, ImageDraw, ImageFont
@@ -14,6 +18,9 @@ class ToolManager:
         self.db_path = db_path
         self.db_connection: Optional[aiosqlite.Connection] = None
         self.shell_sessions: Dict[str, asyncio.subprocess.Process] = {}
+        self.browser_content: str = ""
+        self.browser_url: str = ""
+        self.service_processes: Dict[int, Any] = {}
 
     async def _get_db_connection(self) -> aiosqlite.Connection:
         if self.db_connection is None:
@@ -39,6 +46,22 @@ class ToolManager:
                     type TEXT,
                     content TEXT
             )"""
+        )
+        await conn.execute(
+            """CREATE TABLE IF NOT EXISTS history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT,
+                    content TEXT
+            )"""
+        )
+        await conn.commit()
+
+    async def _add_history_entry(self, role: str, content: str) -> None:
+        """Store a conversation message in the history table."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "INSERT INTO history (role, content) VALUES (?, ?)",
+            (role, content),
         )
         await conn.commit()
 
@@ -214,6 +237,7 @@ class ToolManager:
         return {"path": output_path}
 
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
+
         """Generate speech audio from text and save as an MP3 file."""
         from gtts import gTTS
 
@@ -267,6 +291,7 @@ class ToolManager:
         return {"results": results}
 
     async def info_search_image(self, query: str) -> Dict[str, Any]:
+
         """Search images using the Unsplash API."""
         import aiohttp
 
@@ -285,6 +310,7 @@ class ToolManager:
         ]
         return {"results": results}
 
+
     async def info_search_api(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Perform a generic API GET request."""
         import aiohttp
@@ -297,52 +323,81 @@ class ToolManager:
     # Browser automation (placeholders)
     # ------------------------------------------------------------------
     async def browser_navigate(self, url: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        """Fetch a web page and store its contents for later viewing."""
+        import aiohttp
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    self.browser_content = await resp.text()
+                    self.browser_url = str(resp.url)
+            return {"status": "success", "url": self.browser_url}
+        except Exception as e:
+            logging.error(f"browser_navigate error: {e}")
+            return {"error": str(e)}
 
     async def browser_view(self) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        """Return a preview of the last fetched page."""
+        if not self.browser_content:
+            return {"error": "no page loaded"}
+        return {"url": self.browser_url, "preview": self.browser_content[:500]}
 
     async def browser_click(self, selector: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_input(self, selector: str, text: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_move_mouse(self, x: int, y: int) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_press_key(self, key: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_select_option(self, selector: str, option: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_save_image(self, selector: str, output_path: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_scroll_up(self, amount: int) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_scroll_down(self, amount: int) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_console_exec(self, script: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     async def browser_console_view(self) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        raise NotImplementedError("browser automation not implemented")
 
     # ------------------------------------------------------------------
     # Service deployment (placeholders)
     # ------------------------------------------------------------------
-    async def service_expose_port(self, port: int) -> Dict[str, Any]:
-        return {"error": "service management not implemented"}
+    async def service_expose_port(self, port: int, directory: str = ".") -> Dict[str, Any]:
+        """Expose a simple HTTP service on the given port."""
+        from http.server import SimpleHTTPRequestHandler
+        import socketserver
+        import threading
+
+        def _start_server() -> socketserver.TCPServer:
+            handler = SimpleHTTPRequestHandler
+            handler.directory = directory
+            httpd = socketserver.TCPServer(("", port), handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            return httpd
+
+        server = await asyncio.to_thread(_start_server)
+        actual_port = server.server_address[1]
+        self.service_processes[actual_port] = server
+        return {"port": actual_port, "status": "running"}
 
     async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
-        return {"error": "service management not implemented"}
+        raise NotImplementedError("service management not implemented")
 
     async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
-        return {"error": "service management not implemented"}
+        raise NotImplementedError("service management not implemented")
 
     # ------------------------------------------------------------------
     # Slide presentation (placeholders)
@@ -353,4 +408,10 @@ class ToolManager:
 
     async def slide_present(self, project_name: str) -> Dict[str, Any]:
         return {"project": project_name, "status": "presenting"}
+
+    async def close(self) -> None:
+        """Close the database connection asynchronously."""
+        if self.db_connection:
+            await self.db_connection.close()
+            self.db_connection = None
 
