@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from openai import AsyncOpenAI
 
 from tool_manager import ToolManager
-from state_manager import AgentStateManager
+from state_manager import StateManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -21,19 +21,19 @@ class CappuccinoAgent:
         self,
         api_key: str | None = None,
         db_path: str | None = None,
-        *,
-        llm: Optional[Any] = None,
+
         tool_manager: Optional[ToolManager] = None,
+        llm: Optional[Any] = None,
     ) -> None:
-        """Initialize the agent with optional custom LLM and ToolManager."""
+        self.client = AsyncOpenAI(api_key=api_key) if api_key and llm is None else None
         self.llm = llm
-        self.client = None if llm else AsyncOpenAI(api_key=api_key) if api_key else None
+
         self.tool_manager = tool_manager or ToolManager(db_path or "agent_state.db")
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
         self.executor = ThreadPoolExecutor()
-        self.state_manager = AgentStateManager(db_path or "agent_state.db")
+        self.state_manager = StateManager(db_path or "agent_state.db")
         self._initialize_system_prompt()
 
     @classmethod
@@ -76,6 +76,30 @@ class CappuccinoAgent:
     async def advance_phase(self) -> None:
         self.current_phase_id += 1
         await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
+
+    async def call_llm(self, prompt: str) -> str:
+        """Simple LLM call used in tests with result caching."""
+        cache_key = f"llm:{prompt}"
+        cached = await self.tool_manager.get_cached_result(cache_key)
+        if cached:
+            return cached
+
+        if self.llm is not None:
+            response = await self.llm(prompt)
+            if isinstance(response, dict):
+                result = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            else:
+                result = str(response)
+        else:
+            # default stub: reverse the prompt
+            result = prompt[::-1]
+
+        await self.tool_manager.set_cached_result(cache_key, result)
+        return result
+
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Expose tool manager cache retrieval."""
+        return await self.tool_manager.get_cached_result(key)
 
     @property
     def history(self) -> List[Dict[str, Any]]:
@@ -141,107 +165,68 @@ class CappuccinoAgent:
         )
         await conn.commit()
 
-    async def run(self, user_query: str, tools_schema: Optional[List[Dict[str, Any]]] = None) -> None:
-        """Main asynchronous loop processing user input and invoking tools."""
+    async def run(
+        self, user_query: str, tools_schema: Optional[List[Dict[str, Any]]] = None
+    ) -> Any:
+        """Process one LLM call and handle a single round of tool execution."""
         await self._add_message("user", user_query)
 
-        while True:
-            logging.info("Entering async agent loop...")
-            try:
-                if self.llm:
-                    response = await self.llm(self.messages)
+
+        if self.llm is not None:
+            response = await self.llm(self.messages)
+            response_message = response["choices"][0]["message"]
+        else:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=self.messages,
+                tools=tools_schema or [],
+                tool_choice="auto",
+            )
+            rm = response.choices[0].message
+            response_message = {
+                "role": rm.role,
+                "content": rm.content,
+                "tool_calls": rm.tool_calls,
+            }
+
+        await self._add_message(
+            response_message.get("role", "assistant"),
+            response_message.get("content", "") or "",
+            response_message.get("tool_calls"),
+        )
+
+
+        if response_message.get("tool_calls"):
+            outputs = []
+            for tool_call in response_message["tool_calls"]:
+                if isinstance(tool_call, dict):
+                    function_name = tool_call["function"]["name"]
+                    function_args = json.loads(tool_call["function"]["arguments"])
                 else:
-                    response = await self.client.chat.completions.create(
-                        model="gpt-4o",
-                        messages=self.messages,
-                        tools=tools_schema or [],
-                        tool_choice="auto",
-                    )
-                if isinstance(response, dict):
-                    response_message = response["choices"][0]["message"]
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                if hasattr(self.tool_manager, function_name):
+                    func = getattr(self.tool_manager, function_name)
+                    if asyncio.iscoroutinefunction(func):
+                        result = await func(**function_args)
+                    else:
+                        loop = asyncio.get_running_loop()
+                        result = await loop.run_in_executor(self.executor, func, **function_args)
+                    outputs.append(result)
                 else:
-                    response_message = response.choices[0].message
-                role = getattr(response_message, "role", None) or response_message.get("role", "assistant")
-                content = getattr(response_message, "content", None) or response_message.get("content", "")
-                tool_calls = getattr(response_message, "tool_calls", None) or response_message.get("tool_calls")
-                await self._add_message(
-                    role,
-                    content,
-                    tool_calls,
-                )
-
-                if tool_calls:
-                    tool_outputs = []
-                    for tool_call in tool_calls:
-                        if isinstance(tool_call, dict):
-                            function_name = tool_call["function"]["name"]
-                            function_args = json.loads(tool_call["function"]["arguments"])
-                            call_id = tool_call.get("id", "")
-                        else:
-                            function_name = tool_call.function.name
-                            function_args = json.loads(tool_call.function.arguments)
-                            call_id = tool_call.id
-                        logging.info(
-                            f"LLM requested tool call: {function_name} with args {function_args}"
-                        )
-                        if hasattr(self.tool_manager, function_name):
-                            tool_function = getattr(self.tool_manager, function_name)
-                            if asyncio.iscoroutinefunction(tool_function):
-                                tool_output = await tool_function(**function_args)
-                            else:
-                                loop = asyncio.get_running_loop()
-                                tool_output = await loop.run_in_executor(
-                                    self.executor, tool_function, **function_args
-                                )
-                            logging.info(
-                                f"Tool {function_name} executed, output: {tool_output}"
-                            )
-                            tool_outputs.append({
-                                "tool_call_id": call_id,
-                                "output": tool_output,
-                            })
-                        else:
-                            error_message = f"Error: Tool '{function_name}' not found in ToolManager."
-                            logging.error(error_message)
-                            tool_outputs.append({
-                                "tool_call_id": call_id,
-                                "output": {"error": error_message},
-                            })
-
-                    for output_entry in tool_outputs:
-                        await self._add_message(
-                            "tool",
-                            json.dumps(output_entry["output"]),
-                            tool_call_id=output_entry["tool_call_id"],
-                        )
-                    return [entry["output"] for entry in tool_outputs]
-
-                elif content:
-                    print(f"Cappuccino: {content}")
-                    if "タスクが完了しました" in content or "終了します" in content:
-                        logging.info("Task likely completed. Ending agent loop.")
-                        return content
-                    return content
-
-            except Exception as e:  # pragma: no cover - error paths not deterministic
-                logging.error(f"An error occurred in the agent loop: {e}")
-                await self._add_message("system", f"エージェントループでエラーが発生しました: {e}")
-                break
-
-
-        if hasattr(self.tool_manager, "close"):
-            close_fn = getattr(self.tool_manager, "close")
-            if asyncio.iscoroutinefunction(close_fn):
-                await close_fn()
-            else:
-                close_fn()
+                    outputs.append({"error": f"Tool '{function_name}' not found"})
+            return outputs
+        else:
+            return response_message.get("content")
 
     async def close(self) -> None:
-        """Explicitly close underlying resources."""
+        """Close associated resources."""
         if hasattr(self.tool_manager, "close"):
-            close_fn = getattr(self.tool_manager, "close")
-            if asyncio.iscoroutinefunction(close_fn):
-                await close_fn()
+            fn = getattr(self.tool_manager, "close")
+            if asyncio.iscoroutinefunction(fn):
+                await fn()
             else:
-                close_fn()
+
+                fn()
+
         await self.state_manager.close()

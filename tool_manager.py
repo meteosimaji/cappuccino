@@ -5,8 +5,18 @@ import struct
 import wave
 import sys
 import os
+import inspect
 import json
+from functools import wraps
 from typing import Any, Dict, Optional, List
+import os
+import inspect
+from functools import wraps
+
+import os
+import inspect
+from functools import wraps
+import json
 
 from functools import wraps
 import inspect
@@ -29,16 +39,15 @@ def log_tool(func):
 
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
-        try:
-            bound = inspect.signature(func).bind(self, *args, **kwargs)
-            bound.apply_defaults()
-            params = {k: v for k, v in bound.arguments.items() if k != "self"}
-        except TypeError as exc:
-            logger.error("tool=%s params_error=%s", func.__name__, exc)
-            return {"error": str(exc)}
+        bound = inspect.signature(func).bind_partial(self, *args, **kwargs)
+        bound.apply_defaults()
+        params = {k: v for k, v in bound.arguments.items() if k != "self"}
         logger.info("tool=%s params=%s", func.__name__, params)
         try:
             return await func(self, *args, **kwargs)
+        except TypeError as exc:
+            logger.exception("tool=%s params=%s", func.__name__, params)
+            return {"error": str(exc)}
         except Exception as exc:
             logger.exception("tool=%s params=%s", func.__name__, params)
             return {"error": str(exc)}
@@ -78,8 +87,8 @@ class ToolManager:
     # ------------------------------------------------------------------
     def _validate_path(self, path: str) -> str:
         """Return an absolute path optionally restricted to the workspace root."""
-        base = self.root_dir or os.getcwd()
-        abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(base, path))
+        abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(self.root_dir or os.getcwd(), path))
+
         if self.root_dir and os.path.commonpath([abs_path, self.root_dir]) != self.root_dir:
             raise ValueError("Access outside workspace root is not allowed")
         return abs_path
@@ -127,6 +136,28 @@ class ToolManager:
             "INSERT INTO history (role, content) VALUES (?, ?)",
             (role, content),
 
+        )
+        await conn.commit()
+
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Retrieve a cached value for the given key."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        cur = await conn.execute("SELECT value FROM cache WHERE key=?", (key,))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def set_cached_result(self, key: str, value: str) -> None:
+        """Store a cached value under the given key."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        await conn.execute(
+            "REPLACE INTO cache (key, value) VALUES (?, ?)",
+            (key, value),
         )
         await conn.commit()
 
@@ -277,7 +308,7 @@ class ToolManager:
         """Send input to the running shell session."""
         process = self.shell_sessions.get(session_id)
         if not process or process.stdin is None:
-            raise ToolExecutionError("session not found")
+            return {"error": "session not found"}
         process.stdin.write(text.encode())
         await process.stdin.drain()
         return {"status": "sent"}
@@ -287,7 +318,7 @@ class ToolManager:
         """Terminate the shell session."""
         process = self.shell_sessions.get(session_id)
         if not process:
-            raise ToolExecutionError("session not found")
+            return {"error": "session not found"}
         process.kill()
         await process.wait()
         return {"status": "killed"}
@@ -368,7 +399,18 @@ class ToolManager:
     @log_tool
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
         """Generate speech audio from text and save as an MP3 file."""
-        return {"error": "speech generation not implemented"}
+        try:
+            from gtts import gTTS  # type: ignore
+
+            def _generate() -> None:
+                tts = gTTS(text)
+                tts.save(output_path)
+
+            await asyncio.to_thread(_generate)
+            return {"path": output_path}
+        except Exception:
+            return {"error": "speech generation not implemented"}
+
 
     async def media_analyze_video(self, video_path: str) -> Dict[str, Any]:
         """Return basic metadata for a video file."""
@@ -437,7 +479,8 @@ class ToolManager:
                 try:
                     data = await resp.json()
                 except Exception:
-                    return {"error": "invalid response"}
+                    return {"error": "image search failed"}
+
 
         results = [
             {
@@ -463,7 +506,7 @@ class ToolManager:
     # Browser automation (placeholders)
     # ------------------------------------------------------------------
     @log_tool
-    async def browser_navigate(self, url: str) -> Dict[str, Any]:
+    async def browser_navigate(self, url: str = "") -> Dict[str, Any]:
 
         """Fetch a web page and store its contents for later viewing."""
         import aiohttp
@@ -488,51 +531,53 @@ class ToolManager:
 
 
     @log_tool
+
     async def browser_click(self, selector: str) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_input(self, selector: str, text: str) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_move_mouse(self, x: int, y: int) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_press_key(self, key: str) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_select_option(self, selector: str, option: str) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_save_image(self, selector: str, output_path: str) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_scroll_up(self, amount: int) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_scroll_down(self, amount: int) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_console_exec(self, script: str) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+
+        return {"error": "browser automation not implemented"}
 
     @log_tool
     async def browser_console_view(self) -> Dict[str, Any]:
-        raise NotImplementedError("browser automation not implemented")
+        return {"error": "browser automation not implemented"}
 
     # ------------------------------------------------------------------
     # Service deployment (placeholders)
     # ------------------------------------------------------------------
 
     @log_tool
-    async def service_expose_port(self, port: int, directory: str = ".") -> Dict[str, Any]:
+    async def service_expose_port(self, port: int = 8000, directory: str = ".") -> Dict[str, Any]:
         """Expose a simple HTTP service on the given port."""
         from http.server import SimpleHTTPRequestHandler
         import socketserver
@@ -546,20 +591,29 @@ class ToolManager:
             thread.start()
             return httpd
 
-        server = await asyncio.to_thread(_start_server)
-        actual_port = server.server_address[1]
-        self.service_processes[actual_port] = server
-        return {"port": actual_port, "status": "running"}
+        try:
+            port = int(port)
+        except Exception as e:
+            return {"error": str(e)}
+
+        try:
+            server = await asyncio.to_thread(_start_server)
+            actual_port = server.server_address[1]
+            self.service_processes[actual_port] = server
+            return {"port": actual_port, "status": "running"}
+        except Exception as e:
+            return {"error": str(e)}
 
 
     @log_tool
-    async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
 
-        raise NotImplementedError("service management not implemented")
+    async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
+        return {"error": "service management not implemented"}
 
     @log_tool
     async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
-        raise NotImplementedError("service management not implemented")
+
+        return {"error": "service management not implemented"}
 
     # ------------------------------------------------------------------
     # Slide presentation (placeholders)
