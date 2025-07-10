@@ -18,6 +18,8 @@ import inspect
 from functools import wraps
 import json
 
+from functools import wraps
+import inspect
 
 import aiosqlite
 from PIL import Image, ImageDraw, ImageFont
@@ -48,8 +50,8 @@ def log_tool(func):
             return {"error": str(exc)}
         except Exception as exc:
             logger.exception("tool=%s params=%s", func.__name__, params)
-            raise exc
-
+            return {"error": str(exc)}
+    wrapper.__signature__ = inspect.signature(func)
     return wrapper
 
 
@@ -86,6 +88,7 @@ class ToolManager:
     def _validate_path(self, path: str) -> str:
         """Return an absolute path optionally restricted to the workspace root."""
         abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(self.root_dir or os.getcwd(), path))
+
         if self.root_dir and os.path.commonpath([abs_path, self.root_dir]) != self.root_dir:
             raise ValueError("Access outside workspace root is not allowed")
         return abs_path
@@ -148,6 +151,31 @@ class ToolManager:
 
     async def set_cached_result(self, key: str, value: str) -> None:
         """Store a cached value under the given key."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        await conn.execute(
+            "REPLACE INTO cache (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        await conn.commit()
+
+    # ------------------------------------------------------------------
+    # Result caching helpers
+    # ------------------------------------------------------------------
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Return cached value for key if present."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        async with conn.execute("SELECT value FROM cache WHERE key=?", (key,)) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def set_cached_result(self, key: str, value: str) -> None:
+        """Store key/value pair in cache table."""
         conn = await self._get_db_connection()
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
@@ -383,9 +411,13 @@ class ToolManager:
         except Exception:
             return {"error": "speech generation not implemented"}
 
+
     async def media_analyze_video(self, video_path: str) -> Dict[str, Any]:
         """Return basic metadata for a video file."""
-        import cv2
+        try:
+            import cv2
+        except Exception:
+            return {"error": "opencv not available"}
 
         def _analyze() -> Dict[str, Any]:
             cap = cv2.VideoCapture(video_path)
@@ -448,6 +480,7 @@ class ToolManager:
                     data = await resp.json()
                 except Exception:
                     return {"error": "image search failed"}
+
 
         results = [
             {

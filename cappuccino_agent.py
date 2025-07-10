@@ -21,11 +21,13 @@ class CappuccinoAgent:
         self,
         api_key: str | None = None,
         db_path: str | None = None,
+
         tool_manager: Optional[ToolManager] = None,
         llm: Optional[Any] = None,
     ) -> None:
         self.client = AsyncOpenAI(api_key=api_key) if api_key and llm is None else None
         self.llm = llm
+
         self.tool_manager = tool_manager or ToolManager(db_path or "agent_state.db")
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
@@ -35,9 +37,16 @@ class CappuccinoAgent:
         self._initialize_system_prompt()
 
     @classmethod
-    async def create(cls, db_path: str, api_key: str | None = None) -> "CappuccinoAgent":
+    async def create(
+        cls,
+        db_path: str,
+        api_key: str | None = None,
+        *,
+        llm: Optional[Any] = None,
+        tool_manager: Optional[ToolManager] = None,
+    ) -> "CappuccinoAgent":
         """Instantiate agent and load state from the given database."""
-        self = cls(api_key=api_key, db_path=db_path)
+        self = cls(api_key=api_key, db_path=db_path, llm=llm, tool_manager=tool_manager)
         data = await self.state_manager.load()
         self.task_plan = data.get("task_plan", [])
         self.messages = data.get("history", self.messages)
@@ -100,6 +109,36 @@ class CappuccinoAgent:
     def phase(self) -> int:
         return self.current_phase_id
 
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Delegate to ToolManager cache retrieval."""
+        return await self.tool_manager.get_cached_result(key)
+
+    async def set_cached_result(self, key: str, value: str) -> None:
+        """Delegate to ToolManager cache storage."""
+        await self.tool_manager.set_cached_result(key, value)
+
+    async def call_llm(self, prompt: str) -> str:
+        """Call the LLM or fallback stub and cache the result."""
+        cache_key = f"llm:{prompt}"
+        cached = await self.get_cached_result(cache_key)
+        if cached is not None:
+            return cached
+
+        if self.llm:
+            resp = await self.llm(prompt)
+            result = resp if isinstance(resp, str) else resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+        elif self.client:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            result = response.choices[0].message.content or ""
+        else:
+            result = prompt[::-1]
+
+        await self.set_cached_result(cache_key, result)
+        return result
+
     async def _add_message(
         self,
         role: str,
@@ -132,6 +171,7 @@ class CappuccinoAgent:
         """Process one LLM call and handle a single round of tool execution."""
         await self._add_message("user", user_query)
 
+
         if self.llm is not None:
             response = await self.llm(self.messages)
             response_message = response["choices"][0]["message"]
@@ -154,6 +194,7 @@ class CappuccinoAgent:
             response_message.get("content", "") or "",
             response_message.get("tool_calls"),
         )
+
 
         if response_message.get("tool_calls"):
             outputs = []
@@ -185,5 +226,7 @@ class CappuccinoAgent:
             if asyncio.iscoroutinefunction(fn):
                 await fn()
             else:
+
                 fn()
+
         await self.state_manager.close()
