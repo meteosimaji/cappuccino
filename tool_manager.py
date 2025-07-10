@@ -214,8 +214,39 @@ class ToolManager:
         return {"path": output_path}
 
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
-        """Placeholder for speech generation."""
-        return {"error": "speech generation not implemented"}
+        """Generate speech audio from text and save as an MP3 file."""
+        from gtts import gTTS
+
+        def _generate() -> None:
+            tts = gTTS(text)
+            tts.save(output_path)
+
+        await asyncio.to_thread(_generate)
+        return {"path": output_path}
+
+    async def media_analyze_video(self, video_path: str) -> Dict[str, Any]:
+        """Return basic metadata for a video file."""
+        import cv2
+
+        def _analyze() -> Dict[str, Any]:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise ValueError("unable to open video")
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = float(cap.get(cv2.CAP_PROP_FPS)) or 0.0
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            duration = frame_count / fps if fps else 0.0
+            return {
+                "frames": frame_count,
+                "fps": fps,
+                "width": width,
+                "height": height,
+                "duration": duration,
+            }
+
+        return await asyncio.to_thread(_analyze)
 
     # ------------------------------------------------------------------
     # Information search
@@ -236,8 +267,23 @@ class ToolManager:
         return {"results": results}
 
     async def info_search_image(self, query: str) -> Dict[str, Any]:
-        """Placeholder for image search."""
-        return {"error": "image search not implemented"}
+        """Search images using the Unsplash API."""
+        import aiohttp
+
+        url = f"https://unsplash.com/napi/search/photos?query={query}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+
+        results = [
+            {
+                "id": r.get("id"),
+                "description": r.get("alt_description"),
+                "url": r.get("urls", {}).get("small"),
+            }
+            for r in data.get("results", [])
+        ]
+        return {"results": results}
 
     async def info_search_api(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Perform a generic API GET request."""
