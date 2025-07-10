@@ -40,6 +40,32 @@ class ToolManager:
                     content TEXT
             )"""
         )
+        await conn.execute(
+            """CREATE TABLE IF NOT EXISTS cache (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+        await conn.commit()
+
+    # ------------------------------------------------------------------
+    # Cache management
+    # ------------------------------------------------------------------
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Retrieve a cached value by key."""
+        conn = await self._get_db_connection()
+        cur = await conn.execute("SELECT value FROM cache WHERE key=?", (key,))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def set_cached_result(self, key: str, value: str) -> None:
+        """Store a value in the cache."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "REPLACE INTO cache(key, value) VALUES(?, ?)",
+            (key, value),
+        )
         await conn.commit()
 
     # ------------------------------------------------------------------
@@ -222,6 +248,11 @@ class ToolManager:
     # ------------------------------------------------------------------
     async def info_search_web(self, query: str) -> Dict[str, Any]:
         """Search the web using DuckDuckGo and return titles and links."""
+        cache_key = f"info_search_web:{query}"
+        cached = await self.get_cached_result(cache_key)
+        if cached:
+            return json.loads(cached)
+
         import aiohttp
         from bs4 import BeautifulSoup
 
@@ -233,7 +264,9 @@ class ToolManager:
         results = []
         for a in soup.select("a.result__a"):
             results.append({"title": a.text, "href": a.get("href")})
-        return {"results": results}
+        output = {"results": results}
+        await self.set_cached_result(cache_key, json.dumps(output))
+        return output
 
     async def info_search_image(self, query: str) -> Dict[str, Any]:
         """Placeholder for image search."""
