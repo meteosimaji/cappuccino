@@ -1,11 +1,11 @@
 import asyncio
-import os
-import json
 import logging
+import os
 from typing import Any, Dict, Optional
 
 import aiosqlite
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 class ToolManager:
     """Collection of asynchronous tools for the Cappuccino agent."""
@@ -167,7 +167,12 @@ class ToolManager:
     # ------------------------------------------------------------------
     # File operations
     # ------------------------------------------------------------------
-    async def file_read(self, abs_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> Dict[str, Any]:
+    async def file_read(
+        self,
+        abs_path: str,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Read a text file and optionally limit lines."""
         if not os.path.exists(abs_path):
             return {"error": "File not found"}

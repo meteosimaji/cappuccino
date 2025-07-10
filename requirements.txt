@@ -1,0 +1,4 @@
+aiohttp
+aiosqlite
+beautifulsoup4
+pillow

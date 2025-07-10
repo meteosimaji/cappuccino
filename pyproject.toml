@@ -1,0 +1,7 @@
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
