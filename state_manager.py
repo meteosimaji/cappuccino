@@ -3,7 +3,7 @@ import aiosqlite
 import json
 from typing import Any, Dict, List, Optional
 
-class AgentStateManager:
+class StateManager:
     """Persist and restore Cappuccino agent state using SQLite."""
     def __init__(self, db_path: str = "agent_state.db") -> None:
         self.db_path = db_path
@@ -51,3 +51,20 @@ class AgentStateManager:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
+
+    # Planner convenience methods
+    async def save_plan(self, task_plan: List[Dict[str, Any]], current_step: int = 0) -> None:
+        """Persist a task plan and current step."""
+        data = await self.load()
+        history = data.get("history", [])
+        await self.save(task_plan, history, current_step)
+
+    async def load_plan(self) -> Dict[str, Any]:
+        """Load just the task plan and current step."""
+        data = await self.load()
+        return {"task_plan": data.get("task_plan", []), "current_step": data.get("phase", 0)}
+
+    async def update_step(self, step: int) -> None:
+        """Update the current step while preserving plan and history."""
+        data = await self.load()
+        await self.save(data.get("task_plan", []), data.get("history", []), step)
