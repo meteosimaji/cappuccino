@@ -6,6 +6,7 @@ from tool_manager import ToolManager
 
 @pytest.mark.asyncio
 async def test_file_read_and_append(tmp_path):
+
     async with ToolManager(db_path=os.path.join(tmp_path, "db.sqlite")) as tm:
         file_path = tmp_path / "sample.txt"
         await asyncio.to_thread(file_path.write_text, "hello\n")
@@ -115,4 +116,16 @@ async def test_media_analyze_video(monkeypatch):
     result = await tm.media_analyze_video("dummy.mp4")
     assert result["frames"] == 10
     assert result["duration"] == 2.0
+
+
+
+@pytest.mark.asyncio
+async def test_disallowed_path(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    tm = ToolManager(db_path=os.path.join(root, "db.sqlite"), root_dir=str(root))
+    outside = tmp_path / "outside.txt"
+    await asyncio.to_thread(outside.write_text, "secret")
+    result = await tm.file_read(str(outside))
+    assert "error" in result
 
