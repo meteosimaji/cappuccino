@@ -1,3 +1,4 @@
+
 """FastAPI interface for Cappuccino agent."""
 
 from typing import Any, AsyncGenerator, Dict

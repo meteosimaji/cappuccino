@@ -1,4 +1,5 @@
 import asyncio
+
 import json
 
 import logging
@@ -166,10 +167,10 @@ class CappuccinoAgent:
                 await self._add_message("system", f"エージェントループでエラーが発生しました: {e}")
                 break
 
-        await self.close()
 
-    async def close(self) -> None:
-        """Persist state and close resources."""
-        await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
-        await self.state_manager.close()
-        await self.tool_manager.close()
+        if hasattr(self.tool_manager, "close"):
+            close_fn = getattr(self.tool_manager, "close")
+            if asyncio.iscoroutinefunction(close_fn):
+                await close_fn()
+            else:
+                close_fn()
