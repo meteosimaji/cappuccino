@@ -8,9 +8,37 @@ import wave
 import sys
 from typing import Any, Dict, Optional, List
 
+
 import aiosqlite
 from PIL import Image, ImageDraw, ImageFont
+
+
+class ToolExecutionError(Exception):
+    """Raised when a tool encounters an error during execution."""
+
+
+logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+
+def log_tool(func):
+    """Decorator to log tool execution with parameters and errors."""
+
+    @wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        bound = inspect.signature(func).bind(self, *args, **kwargs)
+        bound.apply_defaults()
+        params = {k: v for k, v in bound.arguments.items() if k != "self"}
+        logger.info("tool=%s params=%s", func.__name__, params)
+        try:
+            return await func(self, *args, **kwargs)
+        except Exception as exc:
+            logger.exception("tool=%s params=%s", func.__name__, params)
+            raise exc
+
+    return wrapper
+
+
 class ToolManager:
     """Collection of asynchronous tools for the Cappuccino agent."""
 
@@ -97,6 +125,7 @@ class ToolManager:
     # ------------------------------------------------------------------
     # Agent management
     # ------------------------------------------------------------------
+    @log_tool
     async def agent_update_plan(self, task_id: str, plan: str) -> Dict[str, Any]:
         """Create or update a task plan."""
         conn = await self._get_db_connection()
@@ -107,6 +136,7 @@ class ToolManager:
         await conn.commit()
         return {"task_id": task_id, "plan": plan}
 
+    @log_tool
     async def agent_advance_phase(self, task_id: str) -> Dict[str, Any]:
         """Advance task to the next phase."""
         conn = await self._get_db_connection()
@@ -119,6 +149,7 @@ class ToolManager:
         row = await cur.fetchone()
         return {"task_id": task_id, "phase": row[0] if row else None}
 
+    @log_tool
     async def agent_end_task(self, task_id: str) -> Dict[str, Any]:
         """Mark task as completed."""
         conn = await self._get_db_connection()
@@ -129,6 +160,7 @@ class ToolManager:
         await conn.commit()
         return {"task_id": task_id, "status": "completed"}
 
+    @log_tool
     async def agent_schedule_task(self, task_id: str, schedule: str) -> Dict[str, Any]:
         """Set schedule information for a task."""
         conn = await self._get_db_connection()
@@ -142,6 +174,7 @@ class ToolManager:
     # ------------------------------------------------------------------
     # Messaging
     # ------------------------------------------------------------------
+    @log_tool
     async def message_notify_user(self, user_id: str, message: str) -> Dict[str, Any]:
         """Store a notification for the user."""
         conn = await self._get_db_connection()
@@ -152,6 +185,7 @@ class ToolManager:
         await conn.commit()
         return {"user_id": user_id, "message": message}
 
+    @log_tool
     async def message_ask_user(self, user_id: str, question: str) -> Dict[str, Any]:
         """Store a question for the user and return placeholder for response."""
         conn = await self._get_db_connection()
@@ -165,6 +199,7 @@ class ToolManager:
     # ------------------------------------------------------------------
     # Shell management
     # ------------------------------------------------------------------
+    @log_tool
     async def shell_exec(self, command: str, session_id: str, working_dir: str = ".") -> Dict[str, Any]:
         """Execute a shell command asynchronously and store the session."""
         try:
@@ -181,20 +216,22 @@ class ToolManager:
         self.shell_sessions[session_id] = process
         return {"session_id": session_id, "status": "running"}
 
+    @log_tool
     async def shell_view(self, session_id: str) -> Dict[str, Any]:
         """Return current stdout and stderr for the session."""
         process = self.shell_sessions.get(session_id)
         if not process:
-            return {"error": "session not found"}
+            raise ToolExecutionError("session not found")
         stdout = await process.stdout.read() if not process.stdout.at_eof() else b""
         stderr = await process.stderr.read() if not process.stderr.at_eof() else b""
         return {"stdout": stdout.decode(), "stderr": stderr.decode()}
 
+    @log_tool
     async def shell_wait(self, session_id: str) -> Dict[str, Any]:
         """Wait for the process to complete and return outputs."""
         process = self.shell_sessions.get(session_id)
         if not process:
-            return {"error": "session not found"}
+            raise ToolExecutionError("session not found")
         stdout, stderr = await process.communicate()
         return {
             "returncode": process.returncode,
@@ -202,20 +239,22 @@ class ToolManager:
             "stderr": stderr.decode(),
         }
 
+    @log_tool
     async def shell_input(self, session_id: str, text: str) -> Dict[str, Any]:
         """Send input to the running shell session."""
         process = self.shell_sessions.get(session_id)
         if not process or process.stdin is None:
-            return {"error": "session not found"}
+            raise ToolExecutionError("session not found")
         process.stdin.write(text.encode())
         await process.stdin.drain()
         return {"status": "sent"}
 
+    @log_tool
     async def shell_kill(self, session_id: str) -> Dict[str, Any]:
         """Terminate the shell session."""
         process = self.shell_sessions.get(session_id)
         if not process:
-            return {"error": "session not found"}
+            raise ToolExecutionError("session not found")
         process.kill()
         await process.wait()
         return {"status": "killed"}
@@ -223,6 +262,7 @@ class ToolManager:
     # ------------------------------------------------------------------
     # File operations
     # ------------------------------------------------------------------
+    @log_tool
     async def file_read(self, abs_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> Dict[str, Any]:
         """Read a text file and optionally limit lines."""
         try:
@@ -230,13 +270,14 @@ class ToolManager:
         except ValueError as e:
             return {"error": str(e)}
         if not os.path.exists(abs_path):
-            return {"error": "File not found"}
+            raise FileNotFoundError(abs_path)
         content = await asyncio.to_thread(lambda: open(abs_path, "r").read())
         lines = content.splitlines(True)
         if start_line is not None or end_line is not None:
             lines = lines[start_line:end_line]
         return {"content": "".join(lines)}
 
+    @log_tool
     async def file_append_text(self, abs_path: str, text: str) -> Dict[str, Any]:
         """Append text to a file."""
         try:
@@ -250,6 +291,7 @@ class ToolManager:
         with open(abs_path, "a") as f:
             f.write(text)
 
+    @log_tool
     async def file_replace_text(self, abs_path: str, old: str, new: str) -> Dict[str, Any]:
         """Replace text in a file."""
         try:
@@ -257,7 +299,7 @@ class ToolManager:
         except ValueError as e:
             return {"error": str(e)}
         if not os.path.exists(abs_path):
-            return {"error": "File not found"}
+            raise FileNotFoundError(abs_path)
         await asyncio.to_thread(self._replace_text, abs_path, old, new)
         return {"status": "replaced"}
 
@@ -271,6 +313,7 @@ class ToolManager:
     # ------------------------------------------------------------------
     # Media generation
     # ------------------------------------------------------------------
+    @log_tool
     async def media_generate_image(self, text: str, output_path: str) -> Dict[str, Any]:
         """Generate a simple image with text."""
         try:
@@ -287,7 +330,9 @@ class ToolManager:
         await asyncio.to_thread(_generate)
         return {"path": output_path}
 
+    @log_tool
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
+
 
         """Generate speech audio from text and save as an MP3 file."""
         from gtts import gTTS
@@ -323,9 +368,11 @@ class ToolManager:
 
         return await asyncio.to_thread(_analyze)
 
+
     # ------------------------------------------------------------------
     # Information search
     # ------------------------------------------------------------------
+    @log_tool
     async def info_search_web(self, query: str) -> Dict[str, Any]:
         """Search the web using DuckDuckGo and return titles and links."""
         cache_key = f"info_search_web:{query}"
@@ -348,7 +395,9 @@ class ToolManager:
         await self.set_cached_result(cache_key, json.dumps(output))
         return output
 
+    @log_tool
     async def info_search_image(self, query: str) -> Dict[str, Any]:
+
 
         """Search images using the Unsplash API."""
         import aiohttp
@@ -369,6 +418,7 @@ class ToolManager:
         return {"results": results}
 
 
+    @log_tool
     async def info_search_api(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Perform a generic API GET request."""
         import aiohttp
@@ -380,7 +430,9 @@ class ToolManager:
     # ------------------------------------------------------------------
     # Browser automation (placeholders)
     # ------------------------------------------------------------------
+    @log_tool
     async def browser_navigate(self, url: str) -> Dict[str, Any]:
+
         """Fetch a web page and store its contents for later viewing."""
         import aiohttp
         try:
@@ -393,45 +445,60 @@ class ToolManager:
             logging.error(f"browser_navigate error: {e}")
             return {"error": str(e)}
 
+
+    @log_tool
     async def browser_view(self) -> Dict[str, Any]:
+
         """Return a preview of the last fetched page."""
         if not self.browser_content:
             return {"error": "no page loaded"}
         return {"url": self.browser_url, "preview": self.browser_content[:500]}
 
+
+    @log_tool
     async def browser_click(self, selector: str) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_input(self, selector: str, text: str) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_move_mouse(self, x: int, y: int) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_press_key(self, key: str) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_select_option(self, selector: str, option: str) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_save_image(self, selector: str, output_path: str) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_scroll_up(self, amount: int) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_scroll_down(self, amount: int) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_console_exec(self, script: str) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
+    @log_tool
     async def browser_console_view(self) -> Dict[str, Any]:
         raise NotImplementedError("browser automation not implemented")
 
     # ------------------------------------------------------------------
     # Service deployment (placeholders)
     # ------------------------------------------------------------------
+
     async def service_expose_port(self, port: int, directory: str = ".") -> Dict[str, Any]:
         """Expose a simple HTTP service on the given port."""
         from http.server import SimpleHTTPRequestHandler
@@ -451,16 +518,20 @@ class ToolManager:
         self.service_processes[actual_port] = server
         return {"port": actual_port, "status": "running"}
 
+
+    @log_tool
     async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
 
         raise NotImplementedError("service management not implemented")
 
+    @log_tool
     async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
         raise NotImplementedError("service management not implemented")
 
     # ------------------------------------------------------------------
     # Slide presentation (placeholders)
     # ------------------------------------------------------------------
+    @log_tool
     async def slide_initialize(self, project_name: str) -> Dict[str, Any]:
         try:
             project_path = self._validate_path(project_name)
@@ -469,6 +540,7 @@ class ToolManager:
         os.makedirs(project_path, exist_ok=True)
         return {"project": project_path}
 
+    @log_tool
     async def slide_present(self, project_name: str) -> Dict[str, Any]:
         try:
             project_path = self._validate_path(project_name)
