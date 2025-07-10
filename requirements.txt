@@ -1,0 +1,10 @@
+aiosqlite
+aiohttp
+Pillow
+beautifulsoup4
+openai
+fastapi
+pytest
+
+pytest-asyncio
+
