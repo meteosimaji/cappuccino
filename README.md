@@ -1,16 +1,29 @@
 # Cappuccino
 
-This repository contains asynchronous tools for the Cappuccino agent and a small test suite.
+Cappuccino aims to be a general‑purpose AI assistant. The project follows the design guidelines in `AGENTS.md` which emphasize high quality code, modular architecture and robust asynchronous tooling. Tools are intended to run concurrently and the API is exposed through FastAPI for easy humanoid integration.
 
-## Running Tests
+## Setup
+1. Create a Python environment (Python 3.12 or later recommended).
+2. Install dependencies:
+   ```bash
+   pip install fastapi uvicorn aiosqlite aiohttp pillow beautifulsoup4 pytest pytest-asyncio
+   ```
 
-Install dependencies and run the tests using `pytest`:
-
+## Running the server
+Start the FastAPI server with:
 ```bash
-pip install -r requirements.txt
+uvicorn main:app --reload
+```
+This runs the minimal API defined in `main.py`.
+
+## Testing
+Execute unit tests using `pytest`:
+```bash
 pytest -q
 ```
 
-## Continuous Integration
-
-A GitHub Actions workflow installs the dependencies defined in `requirements.txt` and runs the test suite on every push and pull request. API keys such as `OPENAI_API_KEY` and `SEARCH_API_KEY` are provided to the workflow via repository secrets so no sensitive values are committed to the repository.
+## Design philosophy
+Key principles from `AGENTS.md`:
+- Produce readable and maintainable Python code with proper error handling and testing【F:AGENTS.md†L80-L95】.
+- Expose the agent core through a high-performance asynchronous API using FastAPI and WebSockets【F:AGENTS.md†L1760-L1776】.
+- Ensure state management, sandbox awareness and parallel execution where appropriate【F:AGENTS.md†L1840-L1848】.

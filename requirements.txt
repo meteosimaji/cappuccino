@@ -1,6 +1,9 @@
 aiosqlite
 aiohttp
-beautifulsoup4
 Pillow
+beautifulsoup4
+openai
+fastapi
 pytest
+
 pytest-asyncio
