@@ -52,6 +52,7 @@ class StateManager:
             await self._conn.close()
             self._conn = None
 
+
     # Planner convenience methods
     async def save_plan(self, task_plan: List[Dict[str, Any]], current_step: int = 0) -> None:
         """Persist a task plan and current step."""

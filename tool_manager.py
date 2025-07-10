@@ -58,7 +58,7 @@ class ToolManager:
 
     def __init__(self, db_path: str = "agent_state.db", root_dir: Optional[str] = None):
         self.db_path = db_path
-        self.root_dir = os.path.abspath(root_dir or os.getcwd())
+        self.root_dir = os.path.abspath(root_dir) if root_dir else None
         self.db_connection: Optional[aiosqlite.Connection] = None
         self.shell_sessions: Dict[str, asyncio.subprocess.Process] = {}
         self.browser_content: str = ""
@@ -84,9 +84,9 @@ class ToolManager:
     # Path utilities
     # ------------------------------------------------------------------
     def _validate_path(self, path: str) -> str:
-        """Return an absolute path restricted to the workspace root."""
-        abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(self.root_dir, path))
-        if os.path.commonpath([abs_path, self.root_dir]) != self.root_dir:
+        """Return an absolute path optionally restricted to the workspace root."""
+        abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(self.root_dir or os.getcwd(), path))
+        if self.root_dir and os.path.commonpath([abs_path, self.root_dir]) != self.root_dir:
             raise ValueError("Access outside workspace root is not allowed")
         return abs_path
 
@@ -133,6 +133,28 @@ class ToolManager:
             "INSERT INTO history (role, content) VALUES (?, ?)",
             (role, content),
 
+        )
+        await conn.commit()
+
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Retrieve a cached value for the given key."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        cur = await conn.execute("SELECT value FROM cache WHERE key=?", (key,))
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def set_cached_result(self, key: str, value: str) -> None:
+        """Store a cached value under the given key."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        await conn.execute(
+            "REPLACE INTO cache (key, value) VALUES (?, ?)",
+            (key, value),
         )
         await conn.commit()
 
@@ -235,7 +257,7 @@ class ToolManager:
         """Return current stdout and stderr for the session."""
         process = self.shell_sessions.get(session_id)
         if not process:
-            raise ToolExecutionError("session not found")
+            return {"error": "session not found"}
         stdout = await process.stdout.read() if not process.stdout.at_eof() else b""
         stderr = await process.stderr.read() if not process.stderr.at_eof() else b""
         return {"stdout": stdout.decode(), "stderr": stderr.decode()}
@@ -258,7 +280,7 @@ class ToolManager:
         """Send input to the running shell session."""
         process = self.shell_sessions.get(session_id)
         if not process or process.stdin is None:
-            raise ToolExecutionError("session not found")
+            return {"error": "session not found"}
         process.stdin.write(text.encode())
         await process.stdin.drain()
         return {"status": "sent"}
@@ -268,7 +290,7 @@ class ToolManager:
         """Terminate the shell session."""
         process = self.shell_sessions.get(session_id)
         if not process:
-            raise ToolExecutionError("session not found")
+            return {"error": "session not found"}
         process.kill()
         await process.wait()
         return {"status": "killed"}
@@ -286,7 +308,7 @@ class ToolManager:
         except ValueError as e:
             return {"error": str(e)}
         if not os.path.exists(abs_path):
-            raise FileNotFoundError(abs_path)
+            return {"error": f"File not found: {abs_path}"}
         content = await asyncio.to_thread(lambda: open(abs_path, "r").read())
         lines = content.splitlines(True)
         if start_line is not None or end_line is not None:
@@ -348,17 +370,18 @@ class ToolManager:
 
     @log_tool
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
-
-
         """Generate speech audio from text and save as an MP3 file."""
-        from gtts import gTTS
+        try:
+            from gtts import gTTS  # type: ignore
 
-        def _generate() -> None:
-            tts = gTTS(text)
-            tts.save(output_path)
+            def _generate() -> None:
+                tts = gTTS(text)
+                tts.save(output_path)
 
-        await asyncio.to_thread(_generate)
-        return {"path": output_path}
+            await asyncio.to_thread(_generate)
+            return {"path": output_path}
+        except Exception:
+            return {"error": "speech generation not implemented"}
 
     async def media_analyze_video(self, video_path: str) -> Dict[str, Any]:
         """Return basic metadata for a video file."""
@@ -421,7 +444,10 @@ class ToolManager:
         url = f"https://unsplash.com/napi/search/photos?query={query}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                data = await resp.json()
+                try:
+                    data = await resp.json()
+                except Exception:
+                    return {"error": "image search failed"}
 
         results = [
             {
@@ -447,7 +473,7 @@ class ToolManager:
     # Browser automation (placeholders)
     # ------------------------------------------------------------------
     @log_tool
-    async def browser_navigate(self, url: str) -> Dict[str, Any]:
+    async def browser_navigate(self, url: str = "") -> Dict[str, Any]:
 
         """Fetch a web page and store its contents for later viewing."""
         import aiohttp
@@ -472,6 +498,7 @@ class ToolManager:
 
 
     @log_tool
+
     async def browser_click(self, selector: str) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
@@ -505,6 +532,7 @@ class ToolManager:
 
     @log_tool
     async def browser_console_exec(self, script: str) -> Dict[str, Any]:
+
         return {"error": "browser automation not implemented"}
 
     @log_tool
@@ -515,7 +543,8 @@ class ToolManager:
     # Service deployment (placeholders)
     # ------------------------------------------------------------------
 
-    async def service_expose_port(self, port: int, directory: str = ".") -> Dict[str, Any]:
+    @log_tool
+    async def service_expose_port(self, port: int = 8000, directory: str = ".") -> Dict[str, Any]:
         """Expose a simple HTTP service on the given port."""
         from http.server import SimpleHTTPRequestHandler
         import socketserver
@@ -544,11 +573,13 @@ class ToolManager:
 
 
     @log_tool
+
     async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
         return {"error": "service management not implemented"}
 
     @log_tool
     async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
+
         return {"error": "service management not implemented"}
 
     # ------------------------------------------------------------------
