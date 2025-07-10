@@ -1,0 +1,11 @@
+import os
+from dataclasses import dataclass
+
+@dataclass
+class Settings:
+    """Application configuration loaded from environment variables."""
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    anthropic_api_key: str | None = os.getenv("ANTHROPIC_API_KEY")
+    azure_openai_key: str | None = os.getenv("AZURE_OPENAI_API_KEY")
+
+settings = Settings()
