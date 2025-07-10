@@ -1,0 +1,6 @@
+aiosqlite
+aiohttp
+beautifulsoup4
+Pillow
+pytest
+pytest-asyncio
