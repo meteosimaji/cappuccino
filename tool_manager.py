@@ -10,10 +10,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 class ToolManager:
     """Collection of asynchronous tools for the Cappuccino agent."""
 
-    def __init__(self, db_path: str = "agent_state.db"):
+    def __init__(self, db_path: str = "agent_state.db", root_dir: Optional[str] = None):
         self.db_path = db_path
+        self.root_dir = os.path.abspath(root_dir or os.getcwd())
         self.db_connection: Optional[aiosqlite.Connection] = None
         self.shell_sessions: Dict[str, asyncio.subprocess.Process] = {}
+
+    # ------------------------------------------------------------------
+    # Path utilities
+    # ------------------------------------------------------------------
+    def _validate_path(self, path: str) -> str:
+        """Return an absolute path restricted to the workspace root."""
+        abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(self.root_dir, path))
+        if os.path.commonpath([abs_path, self.root_dir]) != self.root_dir:
+            raise ValueError("Access outside workspace root is not allowed")
+        return abs_path
 
     async def _get_db_connection(self) -> aiosqlite.Connection:
         if self.db_connection is None:
@@ -115,6 +126,10 @@ class ToolManager:
     # ------------------------------------------------------------------
     async def shell_exec(self, command: str, session_id: str, working_dir: str = ".") -> Dict[str, Any]:
         """Execute a shell command asynchronously and store the session."""
+        try:
+            working_dir = self._validate_path(working_dir)
+        except ValueError as e:
+            return {"error": str(e)}
         process = await asyncio.create_subprocess_shell(
             command,
             cwd=working_dir,
@@ -169,6 +184,10 @@ class ToolManager:
     # ------------------------------------------------------------------
     async def file_read(self, abs_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> Dict[str, Any]:
         """Read a text file and optionally limit lines."""
+        try:
+            abs_path = self._validate_path(abs_path)
+        except ValueError as e:
+            return {"error": str(e)}
         if not os.path.exists(abs_path):
             return {"error": "File not found"}
         content = await asyncio.to_thread(lambda: open(abs_path, "r").read())
@@ -179,6 +198,10 @@ class ToolManager:
 
     async def file_append_text(self, abs_path: str, text: str) -> Dict[str, Any]:
         """Append text to a file."""
+        try:
+            abs_path = self._validate_path(abs_path)
+        except ValueError as e:
+            return {"error": str(e)}
         await asyncio.to_thread(self._append_text, abs_path, text)
         return {"status": "appended"}
 
@@ -188,6 +211,10 @@ class ToolManager:
 
     async def file_replace_text(self, abs_path: str, old: str, new: str) -> Dict[str, Any]:
         """Replace text in a file."""
+        try:
+            abs_path = self._validate_path(abs_path)
+        except ValueError as e:
+            return {"error": str(e)}
         if not os.path.exists(abs_path):
             return {"error": "File not found"}
         await asyncio.to_thread(self._replace_text, abs_path, old, new)
@@ -205,11 +232,17 @@ class ToolManager:
     # ------------------------------------------------------------------
     async def media_generate_image(self, text: str, output_path: str) -> Dict[str, Any]:
         """Generate a simple image with text."""
+        try:
+            output_path = self._validate_path(output_path)
+        except ValueError as e:
+            return {"error": str(e)}
+
         def _generate() -> None:
             img = Image.new("RGB", (400, 200), color="white")
             draw = ImageDraw.Draw(img)
             draw.text((10, 90), text, fill="black")
             img.save(output_path)
+
         await asyncio.to_thread(_generate)
         return {"path": output_path}
 
@@ -293,18 +326,34 @@ class ToolManager:
         return {"error": "service management not implemented"}
 
     async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
+        try:
+            _ = self._validate_path(source_dir)
+        except ValueError as e:
+            return {"error": str(e)}
         return {"error": "service management not implemented"}
 
     async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
+        try:
+            _ = self._validate_path(source_dir)
+        except ValueError as e:
+            return {"error": str(e)}
         return {"error": "service management not implemented"}
 
     # ------------------------------------------------------------------
     # Slide presentation (placeholders)
     # ------------------------------------------------------------------
     async def slide_initialize(self, project_name: str) -> Dict[str, Any]:
-        os.makedirs(project_name, exist_ok=True)
-        return {"project": project_name}
+        try:
+            project_path = self._validate_path(project_name)
+        except ValueError as e:
+            return {"error": str(e)}
+        os.makedirs(project_path, exist_ok=True)
+        return {"project": project_path}
 
     async def slide_present(self, project_name: str) -> Dict[str, Any]:
-        return {"project": project_name, "status": "presenting"}
+        try:
+            project_path = self._validate_path(project_name)
+        except ValueError as e:
+            return {"error": str(e)}
+        return {"project": project_path, "status": "presenting"}
 
