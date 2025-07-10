@@ -63,6 +63,7 @@ class ToolManager:
             )"""
         )
         await conn.execute(
+
             """CREATE TABLE IF NOT EXISTS history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     role TEXT,
@@ -71,12 +72,14 @@ class ToolManager:
         )
         await conn.commit()
 
+
     async def _add_history_entry(self, role: str, content: str) -> None:
         """Store a conversation message in the history table."""
         conn = await self._get_db_connection()
         await conn.execute(
             "INSERT INTO history (role, content) VALUES (?, ?)",
             (role, content),
+
         )
         await conn.commit()
 
@@ -292,6 +295,11 @@ class ToolManager:
     # ------------------------------------------------------------------
     async def info_search_web(self, query: str) -> Dict[str, Any]:
         """Search the web using DuckDuckGo and return titles and links."""
+        cache_key = f"info_search_web:{query}"
+        cached = await self.get_cached_result(cache_key)
+        if cached:
+            return json.loads(cached)
+
         import aiohttp
         from bs4 import BeautifulSoup
 
@@ -303,7 +311,9 @@ class ToolManager:
         results = []
         for a in soup.select("a.result__a"):
             results.append({"title": a.text, "href": a.get("href")})
-        return {"results": results}
+        output = {"results": results}
+        await self.set_cached_result(cache_key, json.dumps(output))
+        return output
 
     async def info_search_image(self, query: str) -> Dict[str, Any]:
 

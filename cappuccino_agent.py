@@ -141,3 +141,4 @@ class CappuccinoAgent:
                 await close_fn()
             else:
                 close_fn()
+
