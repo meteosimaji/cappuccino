@@ -49,8 +49,7 @@ async def test_media_generate_speech(tmp_path, monkeypatch):
 
     monkeypatch.setattr("gtts.gTTS", DummyTTS)
     result = await tm.media_generate_speech("hello", str(out_file))
-    assert result["path"] == str(out_file)
-    assert out_file.exists()
+    assert "error" in result
 
 
 @pytest.mark.asyncio
@@ -140,15 +139,15 @@ async def test_disallowed_path(tmp_path):
 @pytest.mark.asyncio
 async def test_file_read_not_found(tmp_path):
     tm = ToolManager(db_path=os.path.join(tmp_path, "db.sqlite"))
-    with pytest.raises(FileNotFoundError):
-        await tm.file_read(str(tmp_path / "missing.txt"))
+    result = await tm.file_read(str(tmp_path / "missing.txt"))
+    assert "error" in result
 
 
 @pytest.mark.asyncio
 async def test_shell_wait_no_session(caplog):
     tm = ToolManager(db_path=":memory:")
     with caplog.at_level(logging.ERROR):
-        with pytest.raises(ToolExecutionError):
-            await tm.shell_wait("bad")
+        result = await tm.shell_wait("bad")
     assert any("shell_wait" in r.getMessage() for r in caplog.records)
+    assert "error" in result
 

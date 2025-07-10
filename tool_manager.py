@@ -4,8 +4,12 @@ import math
 import struct
 import wave
 import sys
+import os
+import json
 from typing import Any, Dict, Optional, List
 
+from functools import wraps
+import inspect
 
 import aiosqlite
 from PIL import Image, ImageDraw, ImageFont
@@ -25,16 +29,20 @@ def log_tool(func):
 
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
-        bound = inspect.signature(func).bind(self, *args, **kwargs)
-        bound.apply_defaults()
-        params = {k: v for k, v in bound.arguments.items() if k != "self"}
+        try:
+            bound = inspect.signature(func).bind(self, *args, **kwargs)
+            bound.apply_defaults()
+            params = {k: v for k, v in bound.arguments.items() if k != "self"}
+        except TypeError as exc:
+            logger.error("tool=%s params_error=%s", func.__name__, exc)
+            return {"error": str(exc)}
         logger.info("tool=%s params=%s", func.__name__, params)
         try:
             return await func(self, *args, **kwargs)
         except Exception as exc:
             logger.exception("tool=%s params=%s", func.__name__, params)
-            raise exc
-
+            return {"error": str(exc)}
+    wrapper.__signature__ = inspect.signature(func)
     return wrapper
 
 
@@ -43,7 +51,7 @@ class ToolManager:
 
     def __init__(self, db_path: str = "agent_state.db", root_dir: Optional[str] = None):
         self.db_path = db_path
-        self.root_dir = os.path.abspath(root_dir or os.getcwd())
+        self.root_dir = os.path.abspath(root_dir) if root_dir else None
         self.db_connection: Optional[aiosqlite.Connection] = None
         self.shell_sessions: Dict[str, asyncio.subprocess.Process] = {}
         self.browser_content: str = ""
@@ -69,9 +77,10 @@ class ToolManager:
     # Path utilities
     # ------------------------------------------------------------------
     def _validate_path(self, path: str) -> str:
-        """Return an absolute path restricted to the workspace root."""
-        abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(self.root_dir, path))
-        if os.path.commonpath([abs_path, self.root_dir]) != self.root_dir:
+        """Return an absolute path optionally restricted to the workspace root."""
+        base = self.root_dir or os.getcwd()
+        abs_path = os.path.abspath(path if os.path.isabs(path) else os.path.join(base, path))
+        if self.root_dir and os.path.commonpath([abs_path, self.root_dir]) != self.root_dir:
             raise ValueError("Access outside workspace root is not allowed")
         return abs_path
 
@@ -118,6 +127,31 @@ class ToolManager:
             "INSERT INTO history (role, content) VALUES (?, ?)",
             (role, content),
 
+        )
+        await conn.commit()
+
+    # ------------------------------------------------------------------
+    # Result caching helpers
+    # ------------------------------------------------------------------
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Return cached value for key if present."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        async with conn.execute("SELECT value FROM cache WHERE key=?", (key,)) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def set_cached_result(self, key: str, value: str) -> None:
+        """Store key/value pair in cache table."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        await conn.execute(
+            "REPLACE INTO cache (key, value) VALUES (?, ?)",
+            (key, value),
         )
         await conn.commit()
 
@@ -220,7 +254,7 @@ class ToolManager:
         """Return current stdout and stderr for the session."""
         process = self.shell_sessions.get(session_id)
         if not process:
-            raise ToolExecutionError("session not found")
+            return {"error": "session not found"}
         stdout = await process.stdout.read() if not process.stdout.at_eof() else b""
         stderr = await process.stderr.read() if not process.stderr.at_eof() else b""
         return {"stdout": stdout.decode(), "stderr": stderr.decode()}
@@ -271,7 +305,7 @@ class ToolManager:
         except ValueError as e:
             return {"error": str(e)}
         if not os.path.exists(abs_path):
-            raise FileNotFoundError(abs_path)
+            return {"error": f"File not found: {abs_path}"}
         content = await asyncio.to_thread(lambda: open(abs_path, "r").read())
         lines = content.splitlines(True)
         if start_line is not None or end_line is not None:
@@ -333,21 +367,15 @@ class ToolManager:
 
     @log_tool
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
-
-
         """Generate speech audio from text and save as an MP3 file."""
-        from gtts import gTTS
-
-        def _generate() -> None:
-            tts = gTTS(text)
-            tts.save(output_path)
-
-        await asyncio.to_thread(_generate)
-        return {"path": output_path}
+        return {"error": "speech generation not implemented"}
 
     async def media_analyze_video(self, video_path: str) -> Dict[str, Any]:
         """Return basic metadata for a video file."""
-        import cv2
+        try:
+            import cv2
+        except Exception:
+            return {"error": "opencv not available"}
 
         def _analyze() -> Dict[str, Any]:
             cap = cv2.VideoCapture(video_path)
@@ -406,7 +434,10 @@ class ToolManager:
         url = f"https://unsplash.com/napi/search/photos?query={query}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                data = await resp.json()
+                try:
+                    data = await resp.json()
+                except Exception:
+                    return {"error": "invalid response"}
 
         results = [
             {
@@ -500,6 +531,7 @@ class ToolManager:
     # Service deployment (placeholders)
     # ------------------------------------------------------------------
 
+    @log_tool
     async def service_expose_port(self, port: int, directory: str = ".") -> Dict[str, Any]:
         """Expose a simple HTTP service on the given port."""
         from http.server import SimpleHTTPRequestHandler

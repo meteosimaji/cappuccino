@@ -17,9 +17,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 class CappuccinoAgent:
     """Asynchronous agent orchestrating LLM interactions and tool use."""
 
-    def __init__(self, api_key: str | None = None, db_path: str | None = None) -> None:
-        self.client = AsyncOpenAI(api_key=api_key) if api_key else None
-        self.tool_manager = ToolManager(db_path or "agent_state.db")
+    def __init__(
+        self,
+        api_key: str | None = None,
+        db_path: str | None = None,
+        *,
+        llm: Optional[Any] = None,
+        tool_manager: Optional[ToolManager] = None,
+    ) -> None:
+        """Initialize the agent with optional custom LLM and ToolManager."""
+        self.llm = llm
+        self.client = None if llm else AsyncOpenAI(api_key=api_key) if api_key else None
+        self.tool_manager = tool_manager or ToolManager(db_path or "agent_state.db")
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
@@ -28,9 +37,16 @@ class CappuccinoAgent:
         self._initialize_system_prompt()
 
     @classmethod
-    async def create(cls, db_path: str, api_key: str | None = None) -> "CappuccinoAgent":
+    async def create(
+        cls,
+        db_path: str,
+        api_key: str | None = None,
+        *,
+        llm: Optional[Any] = None,
+        tool_manager: Optional[ToolManager] = None,
+    ) -> "CappuccinoAgent":
         """Instantiate agent and load state from the given database."""
-        self = cls(api_key=api_key, db_path=db_path)
+        self = cls(api_key=api_key, db_path=db_path, llm=llm, tool_manager=tool_manager)
         data = await self.state_manager.load()
         self.task_plan = data.get("task_plan", [])
         self.messages = data.get("history", self.messages)
@@ -69,6 +85,36 @@ class CappuccinoAgent:
     def phase(self) -> int:
         return self.current_phase_id
 
+    async def get_cached_result(self, key: str) -> Optional[str]:
+        """Delegate to ToolManager cache retrieval."""
+        return await self.tool_manager.get_cached_result(key)
+
+    async def set_cached_result(self, key: str, value: str) -> None:
+        """Delegate to ToolManager cache storage."""
+        await self.tool_manager.set_cached_result(key, value)
+
+    async def call_llm(self, prompt: str) -> str:
+        """Call the LLM or fallback stub and cache the result."""
+        cache_key = f"llm:{prompt}"
+        cached = await self.get_cached_result(cache_key)
+        if cached is not None:
+            return cached
+
+        if self.llm:
+            resp = await self.llm(prompt)
+            result = resp if isinstance(resp, str) else resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+        elif self.client:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            result = response.choices[0].message.content or ""
+        else:
+            result = prompt[::-1]
+
+        await self.set_cached_result(cache_key, result)
+        return result
+
     async def _add_message(
         self,
         role: str,
@@ -102,24 +148,39 @@ class CappuccinoAgent:
         while True:
             logging.info("Entering async agent loop...")
             try:
-                response = await self.client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=self.messages,
-                    tools=tools_schema or [],
-                    tool_choice="auto",
-                )
-                response_message = response.choices[0].message
+                if self.llm:
+                    response = await self.llm(self.messages)
+                else:
+                    response = await self.client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=self.messages,
+                        tools=tools_schema or [],
+                        tool_choice="auto",
+                    )
+                if isinstance(response, dict):
+                    response_message = response["choices"][0]["message"]
+                else:
+                    response_message = response.choices[0].message
+                role = getattr(response_message, "role", None) or response_message.get("role", "assistant")
+                content = getattr(response_message, "content", None) or response_message.get("content", "")
+                tool_calls = getattr(response_message, "tool_calls", None) or response_message.get("tool_calls")
                 await self._add_message(
-                    response_message.role,
-                    response_message.content or "",
-                    response_message.tool_calls,
+                    role,
+                    content,
+                    tool_calls,
                 )
 
-                if response_message.tool_calls:
+                if tool_calls:
                     tool_outputs = []
-                    for tool_call in response_message.tool_calls:
-                        function_name = tool_call.function.name
-                        function_args = json.loads(tool_call.function.arguments)
+                    for tool_call in tool_calls:
+                        if isinstance(tool_call, dict):
+                            function_name = tool_call["function"]["name"]
+                            function_args = json.loads(tool_call["function"]["arguments"])
+                            call_id = tool_call.get("id", "")
+                        else:
+                            function_name = tool_call.function.name
+                            function_args = json.loads(tool_call.function.arguments)
+                            call_id = tool_call.id
                         logging.info(
                             f"LLM requested tool call: {function_name} with args {function_args}"
                         )
@@ -136,14 +197,14 @@ class CappuccinoAgent:
                                 f"Tool {function_name} executed, output: {tool_output}"
                             )
                             tool_outputs.append({
-                                "tool_call_id": tool_call.id,
+                                "tool_call_id": call_id,
                                 "output": tool_output,
                             })
                         else:
                             error_message = f"Error: Tool '{function_name}' not found in ToolManager."
                             logging.error(error_message)
                             tool_outputs.append({
-                                "tool_call_id": tool_call.id,
+                                "tool_call_id": call_id,
                                 "output": {"error": error_message},
                             })
 
@@ -153,14 +214,14 @@ class CappuccinoAgent:
                             json.dumps(output_entry["output"]),
                             tool_call_id=output_entry["tool_call_id"],
                         )
-                    continue
+                    return [entry["output"] for entry in tool_outputs]
 
-                elif response_message.content:
-                    print(f"Cappuccino: {response_message.content}")
-                    if "タスクが完了しました" in response_message.content or "終了します" in response_message.content:
+                elif content:
+                    print(f"Cappuccino: {content}")
+                    if "タスクが完了しました" in content or "終了します" in content:
                         logging.info("Task likely completed. Ending agent loop.")
-                        break
-                    break
+                        return content
+                    return content
 
             except Exception as e:  # pragma: no cover - error paths not deterministic
                 logging.error(f"An error occurred in the agent loop: {e}")
@@ -174,3 +235,13 @@ class CappuccinoAgent:
                 await close_fn()
             else:
                 close_fn()
+
+    async def close(self) -> None:
+        """Explicitly close underlying resources."""
+        if hasattr(self.tool_manager, "close"):
+            close_fn = getattr(self.tool_manager, "close")
+            if asyncio.iscoroutinefunction(close_fn):
+                await close_fn()
+            else:
+                close_fn()
+        await self.state_manager.close()

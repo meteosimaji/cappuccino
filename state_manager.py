@@ -51,3 +51,46 @@ class AgentStateManager:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
+
+
+class StateManager:
+    """Persist planner state (task plan and current step)."""
+
+    def __init__(self, db_path: str = "planner_state.db") -> None:
+        self.db_path = db_path
+        self._conn: Optional[aiosqlite.Connection] = None
+
+    async def _get_conn(self) -> aiosqlite.Connection:
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(self.db_path)
+            await self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS planner_state (id INTEGER PRIMARY KEY, plan TEXT, step INTEGER)"
+            )
+            await self._conn.commit()
+        return self._conn
+
+    async def save_plan(self, plan: List[Dict[str, Any]], current_step: int = 0) -> None:
+        conn = await self._get_conn()
+        await conn.execute(
+            "INSERT OR REPLACE INTO planner_state(id, plan, step) VALUES(1, ?, ?)",
+            (json.dumps(plan), current_step),
+        )
+        await conn.commit()
+
+    async def load_plan(self) -> Dict[str, Any]:
+        conn = await self._get_conn()
+        async with conn.execute("SELECT plan, step FROM planner_state WHERE id=1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {"task_plan": [], "current_step": 0}
+        return {"task_plan": json.loads(row[0]), "current_step": row[1]}
+
+    async def update_step(self, step: int) -> None:
+        conn = await self._get_conn()
+        await conn.execute("UPDATE planner_state SET step=? WHERE id=1", (step,))
+        await conn.commit()
+
+    async def close(self) -> None:
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
