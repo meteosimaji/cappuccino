@@ -1,19 +1,29 @@
 # Cappuccino
 
-Cappuccino is a prototype asynchronous agent toolkit with a `ToolManager` for executing various tasks such as file management, shell commands, and simple web queries.
+Cappuccino aims to be a general‑purpose AI assistant. The project follows the design guidelines in `AGENTS.md` which emphasize high quality code, modular architecture and robust asynchronous tooling. Tools are intended to run concurrently and the API is exposed through FastAPI for easy humanoid integration.
 
-## Installation
+## Setup
+1. Create a Python environment (Python 3.12 or later recommended).
+2. Install dependencies:
+   ```bash
+   pip install fastapi uvicorn aiosqlite aiohttp pillow beautifulsoup4 pytest pytest-asyncio
+   ```
 
-Install dependencies using `pip`:
-
+## Running the server
+Start the FastAPI server with:
 ```bash
-pip install -r requirements.txt
+uvicorn main:app --reload
 ```
+This runs the minimal API defined in `main.py`.
 
 ## Testing
-
-Run the unit tests with:
-
+Execute unit tests using `pytest`:
 ```bash
-pytest
+pytest -q
 ```
+
+## Design philosophy
+Key principles from `AGENTS.md`:
+- Produce readable and maintainable Python code with proper error handling and testing【F:AGENTS.md†L80-L95】.
+- Expose the agent core through a high-performance asynchronous API using FastAPI and WebSockets【F:AGENTS.md†L1760-L1776】.
+- Ensure state management, sandbox awareness and parallel execution where appropriate【F:AGENTS.md†L1840-L1848】.
