@@ -27,4 +27,3 @@ Key principles from `AGENTS.md`:
 - Produce readable and maintainable Python code with proper error handling and testing【F:AGENTS.md†L80-L95】.
 - Expose the agent core through a high-performance asynchronous API using FastAPI and WebSockets【F:AGENTS.md†L1760-L1776】.
 - Ensure state management, sandbox awareness and parallel execution where appropriate【F:AGENTS.md†L1840-L1848】.
-
