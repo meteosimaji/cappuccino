@@ -237,20 +237,40 @@ class ToolManager:
         return {"path": output_path}
 
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
-        """Generate a simple wave file with a sine tone representing the text."""
+
+        """Generate speech audio from text and save as an MP3 file."""
+        from gtts import gTTS
+
         def _generate() -> None:
-            framerate = 44100
-            duration = 1  # seconds
-            freq = 440
-            with wave.open(output_path, "w") as wav:
-                wav.setnchannels(1)
-                wav.setsampwidth(2)
-                wav.setframerate(framerate)
-                for i in range(int(duration * framerate)):
-                    value = int(32767.0 * math.sin(freq * 2 * math.pi * i / framerate))
-                    wav.writeframes(struct.pack("<h", value))
+            tts = gTTS(text)
+            tts.save(output_path)
+
         await asyncio.to_thread(_generate)
         return {"path": output_path}
+
+    async def media_analyze_video(self, video_path: str) -> Dict[str, Any]:
+        """Return basic metadata for a video file."""
+        import cv2
+
+        def _analyze() -> Dict[str, Any]:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise ValueError("unable to open video")
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = float(cap.get(cv2.CAP_PROP_FPS)) or 0.0
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            duration = frame_count / fps if fps else 0.0
+            return {
+                "frames": frame_count,
+                "fps": fps,
+                "width": width,
+                "height": height,
+                "duration": duration,
+            }
+
+        return await asyncio.to_thread(_analyze)
 
     # ------------------------------------------------------------------
     # Information search
@@ -271,21 +291,25 @@ class ToolManager:
         return {"results": results}
 
     async def info_search_image(self, query: str) -> Dict[str, Any]:
-        """Search for image results using DuckDuckGo and return image URLs."""
-        import aiohttp
-        from bs4 import BeautifulSoup
 
-        search_url = "https://duckduckgo.com/?q=" + query + "&iar=images&ia=images"
+        """Search images using the Unsplash API."""
+        import aiohttp
+
+        url = f"https://unsplash.com/napi/search/photos?query={query}"
         async with aiohttp.ClientSession() as session:
-            async with session.get(search_url) as resp:
-                text = await resp.text()
-        soup = BeautifulSoup(text, "html.parser")
-        results: List[str] = []
-        for img in soup.select("img"):
-            src = img.get("src") or img.get("data-src")
-            if src and src.startswith("http"):
-                results.append(src)
-        return {"results": results[:10]}
+            async with session.get(url) as resp:
+                data = await resp.json()
+
+        results = [
+            {
+                "id": r.get("id"),
+                "description": r.get("alt_description"),
+                "url": r.get("urls", {}).get("small"),
+            }
+            for r in data.get("results", [])
+        ]
+        return {"results": results}
+
 
     async def info_search_api(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Perform a generic API GET request."""
