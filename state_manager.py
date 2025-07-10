@@ -1,64 +1,53 @@
-import json
-import logging
-from typing import Any, Dict, List, Optional
 
 import aiosqlite
+import json
+from typing import Any, Dict, List, Optional
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-class StateManager:
-    """Persist and manage agent state asynchronously."""
-
-    def __init__(self, db_path: str = "agent_state.db"):
+class AgentStateManager:
+    """Persist and restore Cappuccino agent state using SQLite."""
+    def __init__(self, db_path: str = "agent_state.db") -> None:
         self.db_path = db_path
         self._conn: Optional[aiosqlite.Connection] = None
 
-    async def _get_connection(self) -> aiosqlite.Connection:
+    async def _get_conn(self) -> aiosqlite.Connection:
         if self._conn is None:
             self._conn = await aiosqlite.connect(self.db_path)
-            await self._initialize()
+            await self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS agent_state (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                )"""
+            )
+            await self._conn.commit()
         return self._conn
 
-    async def _initialize(self) -> None:
-        conn = await self._get_connection()
+    async def load(self) -> Dict[str, Any]:
+        conn = await self._get_conn()
+        async with conn.execute("SELECT key, value FROM agent_state") as cur:
+            rows = await cur.fetchall()
+        data = {k: v for k, v in rows}
+        task_plan = json.loads(data.get("task_plan", "[]"))
+        history = json.loads(data.get("history", "[]"))
+        phase = int(data.get("phase", "0"))
+        return {"task_plan": task_plan, "history": history, "phase": phase}
+
+    async def save(self, task_plan: List[Dict[str, Any]], history: List[Dict[str, Any]], phase: int) -> None:
+        conn = await self._get_conn()
         await conn.execute(
-            """CREATE TABLE IF NOT EXISTS agent_state (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-            )"""
+            "REPLACE INTO agent_state (key, value) VALUES (?, ?)",
+            ("task_plan", json.dumps(task_plan)),
+        )
+        await conn.execute(
+            "REPLACE INTO agent_state (key, value) VALUES (?, ?)",
+            ("history", json.dumps(history)),
+        )
+        await conn.execute(
+            "REPLACE INTO agent_state (key, value) VALUES (?, ?)",
+            ("phase", str(phase)),
         )
         await conn.commit()
 
-    async def save_plan(self, plan: List[Dict[str, Any]], current_step: int = 0) -> None:
-        """Persist plan and current step."""
-        conn = await self._get_connection()
-        await conn.execute(
-            "REPLACE INTO agent_state (key, value) VALUES (?, ?)",
-            ("task_plan", json.dumps(plan)),
-        )
-        await conn.execute(
-            "REPLACE INTO agent_state (key, value) VALUES (?, ?)",
-            ("current_step", str(current_step)),
-        )
-        await conn.commit()
-        logging.info("Agent state saved asynchronously.")
-
-    async def load_plan(self) -> Dict[str, Any]:
-        """Load plan and current step."""
-        conn = await self._get_connection()
-        cursor = await conn.execute("SELECT key, value FROM agent_state")
-        rows = await cursor.fetchall()
-        state = {row[0]: row[1] for row in rows}
-        plan = json.loads(state.get("task_plan", "[]"))
-        current_step = int(state.get("current_step", "0"))
-        logging.info("Agent state loaded asynchronously.")
-        return {"task_plan": plan, "current_step": current_step}
-
-    async def update_step(self, step: int) -> None:
-        """Update the current step."""
-        conn = await self._get_connection()
-        await conn.execute(
-            "REPLACE INTO agent_state (key, value) VALUES (?, ?)",
-            ("current_step", str(step)),
-        )
-        await conn.commit()
+    async def close(self) -> None:
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
