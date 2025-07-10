@@ -49,7 +49,8 @@ class ToolCallResult(BaseModel):
 
 @app.post("/agent/run")
 async def run_agent(request: RunRequest) -> Dict[str, Any]:
-    return await agent.run(request.query)
+    result = await agent.run(request.query)
+    return {"result": result}
 
 
 @app.get("/agent/status")
