@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from openai import AsyncOpenAI
 
 from tool_manager import ToolManager
+from state_manager import AgentStateManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -15,14 +16,25 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 class CappuccinoAgent:
     """Asynchronous agent orchestrating LLM interactions and tool use."""
 
-    def __init__(self, api_key: str) -> None:
-        self.client = AsyncOpenAI(api_key=api_key)
-        self.tool_manager = ToolManager()
+    def __init__(self, api_key: str | None = None, db_path: str | None = None) -> None:
+        self.client = AsyncOpenAI(api_key=api_key) if api_key else None
+        self.tool_manager = ToolManager(db_path or "agent_state.db")
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
         self.executor = ThreadPoolExecutor()
+        self.state_manager = AgentStateManager(db_path or "agent_state.db")
         self._initialize_system_prompt()
+
+    @classmethod
+    async def create(cls, db_path: str, api_key: str | None = None) -> "CappuccinoAgent":
+        """Instantiate agent and load state from the given database."""
+        self = cls(api_key=api_key, db_path=db_path)
+        data = await self.state_manager.load()
+        self.task_plan = data.get("task_plan", [])
+        self.messages = data.get("history", self.messages)
+        self.current_phase_id = data.get("phase", 0)
+        return self
 
     def _initialize_system_prompt(self) -> None:
         """Add initial system prompt describing the agent."""
@@ -35,6 +47,26 @@ class CappuccinoAgent:
             "不明な点があれば、ユーザーに質問してください。"
         )
         self.messages.append({"role": "system", "content": system_prompt})
+
+    async def set_task_plan(self, plan: List[Dict[str, Any]]) -> None:
+        self.task_plan = plan
+        await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
+
+    async def add_message(self, role: str, content: str) -> None:
+        await self._add_message(role, content)
+        await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
+
+    async def advance_phase(self) -> None:
+        self.current_phase_id += 1
+        await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
+
+    @property
+    def history(self) -> List[Dict[str, Any]]:
+        return self.messages
+
+    @property
+    def phase(self) -> int:
+        return self.current_phase_id
 
     async def _add_message(
         self,
@@ -134,9 +166,10 @@ class CappuccinoAgent:
                 await self._add_message("system", f"エージェントループでエラーが発生しました: {e}")
                 break
 
-        if hasattr(self.tool_manager, "close"):
-            close_fn = getattr(self.tool_manager, "close")
-            if asyncio.iscoroutinefunction(close_fn):
-                await close_fn()
-            else:
-                close_fn()
+        await self.close()
+
+    async def close(self) -> None:
+        """Persist state and close resources."""
+        await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
+        await self.state_manager.close()
+        await self.tool_manager.close()

@@ -385,6 +385,49 @@ class ToolManager:
     async def slide_present(self, project_name: str) -> Dict[str, Any]:
         return {"project": project_name, "status": "presenting"}
 
+    async def generate_tool_from_failure(
+        self,
+        task_description: str,
+        error_message: str,
+        api_key: str,
+    ) -> Dict[str, Any]:
+        """Analyze a failed task and create a new tool via LLM.
+
+        The LLM should respond with a complete async Python function
+        definition. The function will be added to this instance.
+        """
+
+        from openai import AsyncOpenAI
+
+        prompt = (
+            "You are a developer assistant that writes new async Python "
+            "functions for the Cappuccino ToolManager. "
+            f"The user task was: {task_description}. "
+            f"It failed with: {error_message}. "
+            "Provide only the function code."
+        )
+
+        client = AsyncOpenAI(api_key=api_key)
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
+
+        code = response.choices[0].message.content
+        local_ns: Dict[str, Any] = {}
+        try:
+            exec(code, {}, local_ns)
+        except Exception as e:  # pragma: no cover - exec failure path
+            return {"error": f"Failed to exec generated code: {e}"}
+
+        func = next((v for v in local_ns.values() if callable(v)), None)
+        if not func:
+            return {"error": "No function definition found"}
+
+        setattr(self, func.__name__, func)
+        return {"name": func.__name__, "code": code}
+
     async def close(self) -> None:
         """Close the database connection asynchronously."""
         if self.db_connection:
