@@ -9,6 +9,14 @@ import inspect
 import json
 from functools import wraps
 from typing import Any, Dict, Optional, List
+import os
+import inspect
+from functools import wraps
+
+import os
+import inspect
+from functools import wraps
+import json
 
 
 import aiosqlite
@@ -29,12 +37,15 @@ def log_tool(func):
 
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
-        bound = inspect.signature(func).bind(self, *args, **kwargs)
+        bound = inspect.signature(func).bind_partial(self, *args, **kwargs)
         bound.apply_defaults()
         params = {k: v for k, v in bound.arguments.items() if k != "self"}
         logger.info("tool=%s params=%s", func.__name__, params)
         try:
             return await func(self, *args, **kwargs)
+        except TypeError as exc:
+            logger.exception("tool=%s params=%s", func.__name__, params)
+            return {"error": str(exc)}
         except Exception as exc:
             logger.exception("tool=%s params=%s", func.__name__, params)
             raise exc
@@ -487,39 +498,41 @@ class ToolManager:
 
 
     @log_tool
-    async def browser_click(self, selector: str = "") -> Dict[str, Any]:
+
+    async def browser_click(self, selector: str) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_input(self, selector: str = "", text: str = "") -> Dict[str, Any]:
+    async def browser_input(self, selector: str, text: str) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_move_mouse(self, x: int = 0, y: int = 0) -> Dict[str, Any]:
+    async def browser_move_mouse(self, x: int, y: int) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_press_key(self, key: str = "") -> Dict[str, Any]:
+    async def browser_press_key(self, key: str) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_select_option(self, selector: str = "", option: str = "") -> Dict[str, Any]:
+    async def browser_select_option(self, selector: str, option: str) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_save_image(self, selector: str = "", output_path: str = "") -> Dict[str, Any]:
+    async def browser_save_image(self, selector: str, output_path: str) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_scroll_up(self, amount: int = 0) -> Dict[str, Any]:
+    async def browser_scroll_up(self, amount: int) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_scroll_down(self, amount: int = 0) -> Dict[str, Any]:
+    async def browser_scroll_down(self, amount: int) -> Dict[str, Any]:
         return {"error": "browser automation not implemented"}
 
     @log_tool
-    async def browser_console_exec(self, script: str = "") -> Dict[str, Any]:
+    async def browser_console_exec(self, script: str) -> Dict[str, Any]:
+
         return {"error": "browser automation not implemented"}
 
     @log_tool
@@ -545,18 +558,28 @@ class ToolManager:
             thread.start()
             return httpd
 
-        server = await asyncio.to_thread(_start_server)
-        actual_port = server.server_address[1]
-        self.service_processes[actual_port] = server
-        return {"port": actual_port, "status": "running"}
+        try:
+            port = int(port)
+        except Exception as e:
+            return {"error": str(e)}
+
+        try:
+            server = await asyncio.to_thread(_start_server)
+            actual_port = server.server_address[1]
+            self.service_processes[actual_port] = server
+            return {"port": actual_port, "status": "running"}
+        except Exception as e:
+            return {"error": str(e)}
 
 
     @log_tool
-    async def service_deploy_frontend(self, source_dir: str = "") -> Dict[str, Any]:
+
+    async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
         return {"error": "service management not implemented"}
 
     @log_tool
-    async def service_deploy_backend(self, source_dir: str = "") -> Dict[str, Any]:
+    async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
+
         return {"error": "service management not implemented"}
 
     # ------------------------------------------------------------------

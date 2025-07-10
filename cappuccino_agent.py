@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from openai import AsyncOpenAI
 
 from tool_manager import ToolManager
-from state_manager import AgentStateManager
+from state_manager import StateManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -31,7 +31,7 @@ class CappuccinoAgent:
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
         self.executor = ThreadPoolExecutor()
-        self.state_manager = AgentStateManager(db_path or "agent_state.db")
+        self.state_manager = StateManager(db_path or "agent_state.db")
         self._initialize_system_prompt()
 
     @classmethod
