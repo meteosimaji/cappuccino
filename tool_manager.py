@@ -40,6 +40,22 @@ class ToolManager:
                     content TEXT
             )"""
         )
+        await conn.execute(
+            """CREATE TABLE IF NOT EXISTS history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT,
+                    content TEXT
+            )"""
+        )
+        await conn.commit()
+
+    async def _add_history_entry(self, role: str, content: str) -> None:
+        """Store a conversation message in the history table."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "INSERT INTO history (role, content) VALUES (?, ?)",
+            (role, content),
+        )
         await conn.commit()
 
     # ------------------------------------------------------------------
@@ -307,4 +323,10 @@ class ToolManager:
 
     async def slide_present(self, project_name: str) -> Dict[str, Any]:
         return {"project": project_name, "status": "presenting"}
+
+    async def close(self) -> None:
+        """Close the database connection asynchronously."""
+        if self.db_connection:
+            await self.db_connection.close()
+            self.db_connection = None
 
