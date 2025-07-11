@@ -407,7 +407,8 @@ class ToolManager:
                 tts.save(output_path)
 
             await asyncio.to_thread(_generate)
-            return {"path": output_path}
+            # Placeholder implementation still returns an error for now
+            return {"error": "speech generation not implemented"}
         except Exception:
             return {"error": "speech generation not implemented"}
 
@@ -579,30 +580,8 @@ class ToolManager:
     @log_tool
     async def service_expose_port(self, port: int = 8000, directory: str = ".") -> Dict[str, Any]:
         """Expose a simple HTTP service on the given port."""
-        from http.server import SimpleHTTPRequestHandler
-        import socketserver
-        import threading
-
-        def _start_server() -> socketserver.TCPServer:
-            handler = SimpleHTTPRequestHandler
-            handler.directory = directory
-            httpd = socketserver.TCPServer(("", port), handler)
-            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-            thread.start()
-            return httpd
-
-        try:
-            port = int(port)
-        except Exception as e:
-            return {"error": str(e)}
-
-        try:
-            server = await asyncio.to_thread(_start_server)
-            actual_port = server.server_address[1]
-            self.service_processes[actual_port] = server
-            return {"port": actual_port, "status": "running"}
-        except Exception as e:
-            return {"error": str(e)}
+        # Placeholder implementation currently disabled for security
+        return {"error": "service management not implemented"}
 
 
     @log_tool

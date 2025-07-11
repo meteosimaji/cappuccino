@@ -16,10 +16,12 @@ dependencies = [
     "beautifulsoup4",
     "openai",
     "fastapi",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest",
     "pytest-asyncio",
+    "ruff",
 ]

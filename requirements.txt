@@ -7,3 +7,4 @@ fastapi
 pytest
 
 pytest-asyncio
+python-dotenv
