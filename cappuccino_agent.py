@@ -94,22 +94,34 @@ class CappuccinoAgent:
         await self.tool_manager.set_cached_result(key, value)
 
     async def call_llm(self, prompt: str) -> str:
-        """Call the LLM or fallback stub and cache the result."""
+        """Call the LLM with emotion context and cache the result."""
         cache_key = f"llm:{prompt}"
         cached = await self.get_cached_result(cache_key)
         if cached is not None:
             return cached
 
+        from emotion_recognizer import detect_emotion
+
+        emotion = detect_emotion(prompt)
+        prompt_with_emotion = f"{prompt}\n[User sentiment: {emotion}]"
+
         if self.llm:
-            resp = await self.llm(prompt)
-            result = resp if isinstance(resp, str) else resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+            resp = await self.llm(prompt_with_emotion)
+            result = (
+                resp
+                if isinstance(resp, str)
+                else resp.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
         elif self.client:
             response = await self.client.chat.completions.create(
                 model="gpt-4.1",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": prompt_with_emotion}],
             )
             result = response.choices[0].message.content or ""
         else:
+            # Fallback stub preserves original behaviour for tests
             result = prompt[::-1]
 
         await self.set_cached_result(cache_key, result)
