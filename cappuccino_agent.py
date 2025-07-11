@@ -105,7 +105,7 @@ class CappuccinoAgent:
             result = resp if isinstance(resp, str) else resp.get("choices", [{}])[0].get("message", {}).get("content", "")
         elif self.client:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4.1",
                 messages=[{"role": "user", "content": prompt}],
             )
             result = response.choices[0].message.content or ""
@@ -153,7 +153,7 @@ class CappuccinoAgent:
             response_message = response["choices"][0]["message"]
         else:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4.1",
                 messages=self.messages,
                 tools=tools_schema or [],
                 tool_choice="auto",

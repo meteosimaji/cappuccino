@@ -484,7 +484,7 @@ class CappuccinoAgent:
             try:
                 # LLMを呼び出す
                 response = self.client.chat.completions.create(
-                    model="gpt-4o", # または "gpt-3.5-turbo" など
+                    model="gpt-4.1", # または "gpt-4.1 nano" など
                     messages=self.messages,
                     tools=tools_schema, # 上記で定義したツールのスキーマ
                     tool_choice="auto" # LLMにツール使用を自動で判断させる
@@ -892,7 +892,7 @@ class ToolManager:
 # async def run(self, user_query: str):
 #     # ...
 #     response = await self.client.chat.completions.create(
-#         model="gpt-4o",
+#         model="gpt-4.1",
 #         messages=self.messages,
 #         tools=tools_schema,
 #         tool_choice="auto"
@@ -927,7 +927,7 @@ async def parallel_llm_calls(api_key: str, prompts: List[str], tools_schema: Lis
             {"role": "user", "content": prompt}
         ]
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=messages,
             tools=tools_schema,
             tool_choice="auto"
@@ -1561,7 +1561,7 @@ class CappuccinoAgent:
             try:
                 # LLMを非同期で呼び出す
                 response = await self.client.chat.completions.create(
-                    model="gpt-4o", 
+                    model="gpt-4.1", 
                     messages=self.messages,
                     tools=tools_schema, 
                     tool_choice="auto" 
