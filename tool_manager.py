@@ -601,7 +601,7 @@ class ToolManager:
 
         client = AsyncOpenAI(api_key=api_key)
         response = await client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
         )
