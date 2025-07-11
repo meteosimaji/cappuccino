@@ -1,25 +1,10 @@
 import asyncio
 import logging
-import math
-import struct
-import wave
-import sys
 import os
-import inspect
 import json
+import inspect
 from functools import wraps
 from typing import Any, Dict, Optional, List
-import os
-import inspect
-from functools import wraps
-
-import os
-import inspect
-from functools import wraps
-import json
-
-from functools import wraps
-import inspect
 
 import aiosqlite
 from PIL import Image, ImageDraw, ImageFont
@@ -136,28 +121,6 @@ class ToolManager:
             "INSERT INTO history (role, content) VALUES (?, ?)",
             (role, content),
 
-        )
-        await conn.commit()
-
-    async def get_cached_result(self, key: str) -> Optional[str]:
-        """Retrieve a cached value for the given key."""
-        conn = await self._get_db_connection()
-        await conn.execute(
-            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        cur = await conn.execute("SELECT value FROM cache WHERE key=?", (key,))
-        row = await cur.fetchone()
-        return row[0] if row else None
-
-    async def set_cached_result(self, key: str, value: str) -> None:
-        """Store a cached value under the given key."""
-        conn = await self._get_db_connection()
-        await conn.execute(
-            "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        await conn.execute(
-            "REPLACE INTO cache (key, value) VALUES (?, ?)",
-            (key, value),
         )
         await conn.commit()
 
