@@ -1,9 +1,10 @@
 
-import sys, pathlib
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import pytest
-import pytest_asyncio
 
 from cappuccino_agent import CappuccinoAgent
 from tool_manager import ToolManager

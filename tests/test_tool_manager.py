@@ -1,16 +1,15 @@
-import pathlib
 import sys
+from pathlib import Path
 
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 import asyncio
 import os
 
 import logging
 import pytest
+
 from tool_manager import ToolManager, ToolExecutionError
 import cv2
-
-
 
 @pytest.mark.asyncio
 async def test_file_read_and_append(tmp_path):
