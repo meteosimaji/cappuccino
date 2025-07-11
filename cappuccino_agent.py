@@ -77,30 +77,6 @@ class CappuccinoAgent:
         self.current_phase_id += 1
         await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
 
-    async def call_llm(self, prompt: str) -> str:
-        """Simple LLM call used in tests with result caching."""
-        cache_key = f"llm:{prompt}"
-        cached = await self.tool_manager.get_cached_result(cache_key)
-        if cached:
-            return cached
-
-        if self.llm is not None:
-            response = await self.llm(prompt)
-            if isinstance(response, dict):
-                result = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-            else:
-                result = str(response)
-        else:
-            # default stub: reverse the prompt
-            result = prompt[::-1]
-
-        await self.tool_manager.set_cached_result(cache_key, result)
-        return result
-
-    async def get_cached_result(self, key: str) -> Optional[str]:
-        """Expose tool manager cache retrieval."""
-        return await self.tool_manager.get_cached_result(key)
-
     @property
     def history(self) -> List[Dict[str, Any]]:
         return self.messages
