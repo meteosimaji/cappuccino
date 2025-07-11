@@ -484,7 +484,7 @@ class CappuccinoAgent:
             try:
                 # LLMを呼び出す
                 response = self.client.chat.completions.create(
-                    model="gpt-4.1", # または "gpt-3.5-turbo" など
+                    model="gpt-4.1", # または "gpt-4.1 nano" など
                     messages=self.messages,
                     tools=tools_schema, # 上記で定義したツールのスキーマ
                     tool_choice="auto" # LLMにツール使用を自動で判断させる
