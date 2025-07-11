@@ -8,3 +8,4 @@ pytest
 
 pytest-asyncio
 python-dotenv
+aio_pika

@@ -8,6 +8,7 @@ import os
 import logging
 import pytest
 from tool_manager import ToolManager, ToolExecutionError
+import cv2
 
 
 
@@ -101,8 +102,6 @@ async def test_media_analyze_video(monkeypatch):
             return True
 
         def get(self, prop):
-            import cv2
-
             if prop == cv2.CAP_PROP_FRAME_COUNT:
                 return 10
             if prop == cv2.CAP_PROP_FPS:
@@ -115,8 +114,6 @@ async def test_media_analyze_video(monkeypatch):
 
         def release(self):
             pass
-
-    import cv2
 
     monkeypatch.setattr("cv2.VideoCapture", lambda path: DummyCap(path))
     result = await tm.media_analyze_video("dummy.mp4")

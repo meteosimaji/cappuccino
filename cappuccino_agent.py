@@ -3,7 +3,7 @@ import asyncio
 import json
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from openai import AsyncOpenAI
@@ -24,6 +24,9 @@ class CappuccinoAgent:
 
         tool_manager: Optional[ToolManager] = None,
         llm: Optional[Any] = None,
+        *,
+        thread_workers: Optional[int] = None,
+        process_workers: Optional[int] = None,
     ) -> None:
         self.client = AsyncOpenAI(api_key=api_key) if api_key and llm is None else None
         self.llm = llm
@@ -32,7 +35,16 @@ class CappuccinoAgent:
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
-        self.executor = ThreadPoolExecutor()
+        self.thread_executor = (
+            ThreadPoolExecutor(max_workers=thread_workers)
+            if thread_workers is not None
+            else ThreadPoolExecutor()
+        )
+        self.process_executor = (
+            ProcessPoolExecutor(max_workers=process_workers)
+            if process_workers is not None
+            else None
+        )
         self.state_manager = StateManager(db_path or "agent_state.db")
         self._initialize_system_prompt()
 
@@ -44,9 +56,18 @@ class CappuccinoAgent:
         *,
         llm: Optional[Any] = None,
         tool_manager: Optional[ToolManager] = None,
+        thread_workers: Optional[int] = None,
+        process_workers: Optional[int] = None,
     ) -> "CappuccinoAgent":
         """Instantiate agent and load state from the given database."""
-        self = cls(api_key=api_key, db_path=db_path, llm=llm, tool_manager=tool_manager)
+        self = cls(
+            api_key=api_key,
+            db_path=db_path,
+            llm=llm,
+            tool_manager=tool_manager,
+            thread_workers=thread_workers,
+            process_workers=process_workers,
+        )
         data = await self.state_manager.load()
         self.task_plan = data.get("task_plan", [])
         self.messages = data.get("history", self.messages)
@@ -92,6 +113,14 @@ class CappuccinoAgent:
     async def set_cached_result(self, key: str, value: str) -> None:
         """Delegate to ToolManager cache storage."""
         await self.tool_manager.set_cached_result(key, value)
+
+    async def _run_sync(self, func, *args, cpu_bound: bool = False, **kwargs):
+        """Run blocking function in the configured executor."""
+        loop = asyncio.get_running_loop()
+        executor = (
+            self.process_executor if cpu_bound and self.process_executor else self.thread_executor
+        )
+        return await loop.run_in_executor(executor, lambda: func(*args, **kwargs))
 
     async def call_llm(self, prompt: str) -> str:
         """Call the LLM or fallback stub and cache the result."""
@@ -186,8 +215,7 @@ class CappuccinoAgent:
                     if asyncio.iscoroutinefunction(func):
                         result = await func(**function_args)
                     else:
-                        loop = asyncio.get_running_loop()
-                        result = await loop.run_in_executor(self.executor, func, **function_args)
+                        result = await self._run_sync(func, **function_args)
                     outputs.append(result)
                 else:
                     outputs.append({"error": f"Tool '{function_name}' not found"})
@@ -206,3 +234,6 @@ class CappuccinoAgent:
                 fn()
 
         await self.state_manager.close()
+        self.thread_executor.shutdown(wait=False)
+        if self.process_executor:
+            self.process_executor.shutdown(wait=False)
