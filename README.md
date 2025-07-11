@@ -31,3 +31,10 @@ Key principles from `AGENTS.md`:
 ## Next steps
 Additional development plans in Japanese can be found in [docs/NEXT_STEPS_JA.md](docs/NEXT_STEPS_JA.md).
 
+
+## Chat CLI
+Run a simple interactive chat loop from the terminal:
+```bash
+python chat_cli.py
+```
+Exit the session with `exit` or `quit`.
