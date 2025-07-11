@@ -1,11 +1,15 @@
 
 """FastAPI interface for Cappuccino agent."""
 
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, List
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from planner import Planner
+from state_manager import StateManager
+from goal_manager import GoalManager
 from tool_manager import ToolManager
+
 
 
 class CappuccinoAgent:
@@ -51,6 +55,10 @@ tool_manager = ToolManager(db_path=":memory:")
 agent = CappuccinoAgent(tool_manager)
 app = FastAPI()
 
+state_manager = StateManager()
+planner = Planner()
+goal_manager = GoalManager(state_manager, {"interests": ["python"]})
+
 
 class RunRequest(BaseModel):
     query: str
@@ -58,6 +66,14 @@ class RunRequest(BaseModel):
 
 class ToolCallResult(BaseModel):
     data: Dict[str, Any]
+
+
+class GoalList(BaseModel):
+    goals: List[str]
+
+
+class StepUpdate(BaseModel):
+    step: int
 
 
 @app.post("/agent/run")
@@ -69,6 +85,32 @@ async def run_agent(request: RunRequest) -> Dict[str, Any]:
 @app.get("/agent/status")
 async def agent_status() -> Dict[str, Any]:
     return await agent.get_status()
+
+
+@app.get("/agent/goals")
+async def agent_goals() -> Dict[str, Any]:
+    suggestions = await goal_manager.derive_goals()
+    confirmed = await goal_manager.current_goals()
+    return {"suggested": suggestions, "confirmed": confirmed}
+
+
+@app.post("/agent/goals")
+async def confirm_goals(goals: GoalList) -> Dict[str, Any]:
+    await goal_manager.confirm_goals(goals.goals)
+    plan = planner.create_plan(". ".join(goals.goals))
+    await state_manager.save_long_term_plan(plan, 0)
+    return {"plan": plan}
+
+
+@app.get("/agent/plan")
+async def get_plan() -> Dict[str, Any]:
+    return await state_manager.load_long_term_plan()
+
+
+@app.post("/agent/plan/advance")
+async def advance_plan(update: StepUpdate) -> Dict[str, Any]:
+    await state_manager.update_long_term_step(update.step)
+    return await state_manager.load_long_term_plan()
 
 
 @app.post("/agent/tool_call_result")
