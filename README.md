@@ -6,8 +6,9 @@ Cappuccino aims to be a general‑purpose AI assistant. The project follows the 
 1. Create a Python environment (Python 3.12 or later recommended).
 2. Install dependencies:
    ```bash
-   pip install fastapi uvicorn aiosqlite aiohttp pillow beautifulsoup4 pytest pytest-asyncio
+   pip install -r requirements.txt
    ```
+3. Copy `.env.example` to `.env` and add your API keys.
 
 ## Running the server
 Start the FastAPI server with:
