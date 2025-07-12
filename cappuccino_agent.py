@@ -174,15 +174,54 @@ class CappuccinoAgent:
         prompt: str,
         tools_schema: List[Dict[str, Any]],
     ) -> str:
-        """Call the LLM using function calling with the provided tools."""
-        messages: List[Dict[str, Any]] = [
-            {"role": "user", "content": prompt}
-        ]
+        """Call the LLM using built-in tools via the Responses API if available."""
+
+        messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
 
         if not self.client:
             # Fallback for tests without an OpenAI client
             return await self.call_llm(prompt)
 
+        if hasattr(self.client, "responses"):
+            # New Responses API with built-in tools
+            first = await self.client.responses.create(
+                model="gpt-4.1",
+                input=messages,
+                tools=tools_schema,
+            )
+
+            for item in getattr(first, "output", []):
+                if getattr(item, "type", "") == "function_call":
+                    func_name = getattr(item, "name", "")
+                    try:
+                        args = json.loads(getattr(item, "arguments", "{}") or "{}")
+                    except Exception:
+                        args = {}
+                    if hasattr(self.tool_manager, func_name):
+                        func = getattr(self.tool_manager, func_name)
+                        result = await func(**args)
+                    else:
+                        result = {"error": f"tool {func_name} not found"}
+
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": getattr(item, "call_id", ""),
+                            "content": json.dumps(result),
+                        }
+                    )
+
+            followup = await self.client.responses.create(
+                model="gpt-4.1",
+                input=messages,
+            )
+
+            for out in getattr(followup, "output", []):
+                if getattr(out, "type", "") == "text":
+                    return getattr(out, "text", "")
+            return ""
+
+        # Fallback to Chat Completions function-calling
         response = await self.client.chat.completions.create(
             model="gpt-4.1",
             messages=messages,
@@ -191,29 +230,6 @@ class CappuccinoAgent:
 
         message = response.choices[0].message
         if message.tool_calls:
-            tool_calls_payload = []
-            for tc in message.tool_calls:
-                if hasattr(tc, "model_dump"):
-                    tool_calls_payload.append(tc.model_dump())
-                else:
-                    tool_calls_payload.append(
-                        {
-                            "id": getattr(tc, "id", ""),
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                            "type": "function",
-                        }
-                    )
-
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content or "",
-                    "tool_calls": tool_calls_payload,
-                }
-            )
             for tool_call in message.tool_calls:
                 func_name = tool_call.function.name
                 try:
