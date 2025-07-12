@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, List, Tuple
 
 import networkx as nx
 from networkx.readwrite import json_graph

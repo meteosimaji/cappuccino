@@ -7,7 +7,6 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
-import json
 from typing import Any, Dict, List, Optional, Callable
 from datetime import datetime
 import threading

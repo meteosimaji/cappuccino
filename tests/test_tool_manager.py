@@ -8,7 +8,7 @@ import os
 import logging
 import pytest
 
-from tool_manager import ToolManager, ToolExecutionError
+from tool_manager import ToolManager
 import cv2
 
 @pytest.mark.asyncio
@@ -152,7 +152,8 @@ async def test_shell_wait_no_session(caplog):
 async def test_media_analyze_image(monkeypatch):
     tm = ToolManager(db_path=":memory:")
 
-    import types, sys
+    import types
+    import sys
     pytesseract = types.SimpleNamespace(image_to_string=lambda img: "text")
     monkeypatch.setitem(sys.modules, "pytesseract", pytesseract)
     monkeypatch.setattr("PIL.Image.open", lambda p: "img")
@@ -165,7 +166,8 @@ async def test_media_analyze_image(monkeypatch):
 async def test_media_recognize_speech(monkeypatch):
     tm = ToolManager(db_path=":memory:")
 
-    import types, sys
+    import types
+    import sys
 
     class DummyAudioFile:
         def __init__(self, path):
@@ -206,7 +208,8 @@ async def test_media_describe_video(monkeypatch):
         def release(self):
             pass
 
-    import types, sys
+    import types
+    import sys
     cv2_mod = types.SimpleNamespace(VideoCapture=lambda path: DummyCap(path))
     monkeypatch.setitem(sys.modules, "cv2", cv2_mod)
 

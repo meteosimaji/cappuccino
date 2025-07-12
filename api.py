@@ -11,10 +11,9 @@ from planner import Planner
 from state_manager import StateManager
 from goal_manager import GoalManager
 from tool_manager import ToolManager
+from cappuccino_agent import CappuccinoAgent
 
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "test"))
-
-from cappuccino_agent import CappuccinoAgent
 
 
 async def stream_events(query: str) -> AsyncGenerator[str, None]:

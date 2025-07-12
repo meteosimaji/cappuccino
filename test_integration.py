@@ -302,7 +302,7 @@ for pkg in sorted(pkg_resources.working_set, key=lambda x: x.project_name):
             "detailed_results": self.test_results
         }
         
-        logger.info(f"=== Test Summary ===")
+        logger.info("=== Test Summary ===")
         logger.info(f"Overall: {'PASS' if overall_success else 'FAIL'}")
         logger.info(f"Tests: {passed_tests}/{total_tests} passed")
         logger.info(f"Duration: {duration:.2f} seconds")

@@ -32,7 +32,7 @@ def test_websocket_events(monkeypatch):
     with client.websocket_connect("/agent/events") as ws:
         ws.send_json({"query": "hi"})
         data1 = ws.receive_text()
-        data2 = ws.receive_text()
+        _ = ws.receive_text()
         data3 = ws.receive_text()
     assert data1 == "thought 0"
     assert data3 == "tool_output:done"

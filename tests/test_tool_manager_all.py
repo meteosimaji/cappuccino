@@ -73,7 +73,8 @@ async def test_media_functions(tm, tmp_path, monkeypatch):
     speech = await tm.media_generate_speech("hi", "out.wav")
     assert "error" in speech
 
-    import types, sys
+    import types
+    import sys
     monkeypatch.setitem(sys.modules, "pytesseract", types.SimpleNamespace(image_to_string=lambda img: "ocr"))
     monkeypatch.setattr("PIL.Image.open", lambda p: "img")
     ocr = await tm.media_analyze_image(str(img_path))

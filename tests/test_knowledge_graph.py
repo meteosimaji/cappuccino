@@ -1,4 +1,7 @@
-import sys, pathlib; sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+import sys
+import pathlib
+
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 import pytest
 
 from tool_manager import ToolManager
