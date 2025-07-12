@@ -8,5 +8,6 @@ pytest
 
 pytest-asyncio
 python-dotenv
+networkx
 aio_pika
 textblob

@@ -7,6 +7,9 @@ from functools import wraps
 from typing import Any, Dict, Optional
 
 import aiosqlite
+from PIL import Image, ImageDraw, ImageFont
+from knowledge_graph import KnowledgeGraph
+from state_manager import StateManager
 from PIL import Image, ImageDraw
 
 
@@ -51,6 +54,7 @@ class ToolManager:
         self.browser_content: str = ""
         self.browser_url: str = ""
         self.service_processes: Dict[int, Any] = {}
+        self.state_manager = StateManager(db_path)
 
     async def __aenter__(self) -> "ToolManager":
         """Open the database connection when entering the context."""
@@ -66,6 +70,7 @@ class ToolManager:
         if self.db_connection is not None:
             await self.db_connection.close()
             self.db_connection = None
+        await self.state_manager.close()
 
     # ------------------------------------------------------------------
     # Path utilities
@@ -148,6 +153,43 @@ class ToolManager:
             (key, value),
         )
         await conn.commit()
+
+    # ------------------------------------------------------------------
+    # Knowledge graph
+    # ------------------------------------------------------------------
+    @log_tool
+    async def graph_add_entity(
+        self, name: str, attrs: Optional[Dict[str, Any]] | None = None
+    ) -> Dict[str, Any]:
+        graph = await self.state_manager.load_graph()
+        graph.add_entity(name, **(attrs or {}))
+        await self.state_manager.save_graph(graph)
+        return {"entity": name}
+
+    @log_tool
+    async def graph_add_relation(
+        self,
+        source: str,
+        target: str,
+        relation: str,
+        attrs: Optional[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        graph = await self.state_manager.load_graph()
+        graph.add_relation(source, target, relation, **(attrs or {}))
+        await self.state_manager.save_graph(graph)
+        return {"source": source, "target": target, "relation": relation}
+
+    @log_tool
+    async def graph_query(self, entity: str) -> Dict[str, Any]:
+        graph = await self.state_manager.load_graph()
+        return {"entity": entity, "relations": graph.query(entity)}
+
+    @log_tool
+    async def graph_remove_relation(self, source: str, target: str, relation: str) -> Dict[str, Any]:
+        graph = await self.state_manager.load_graph()
+        graph.remove_relation(source, target, relation)
+        await self.state_manager.save_graph(graph)
+        return {"status": "removed"}
 
     # ------------------------------------------------------------------
     # Agent management
