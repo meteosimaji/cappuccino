@@ -4,10 +4,10 @@ import os
 import json
 import inspect
 from functools import wraps
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional
 
 import aiosqlite
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 
 class ToolExecutionError(Exception):
@@ -619,10 +619,4 @@ class ToolManager:
 
         setattr(self, func.__name__, func)
         return {"name": func.__name__, "code": code}
-
-    async def close(self) -> None:
-        """Close the database connection asynchronously."""
-        if self.db_connection:
-            await self.db_connection.close()
-            self.db_connection = None
 

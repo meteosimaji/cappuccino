@@ -3,7 +3,7 @@ import asyncio
 import json
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from openai import AsyncOpenAI
@@ -25,6 +25,9 @@ class CappuccinoAgent:
 
         tool_manager: Optional[ToolManager] = None,
         llm: Optional[Any] = None,
+        *,
+        thread_workers: Optional[int] = None,
+        process_workers: Optional[int] = None,
     ) -> None:
         self.client = AsyncOpenAI(api_key=api_key) if api_key and llm is None else None
         self.llm = llm
@@ -36,7 +39,16 @@ class CappuccinoAgent:
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
-        self.executor = ThreadPoolExecutor()
+        self.thread_executor = (
+            ThreadPoolExecutor(max_workers=thread_workers)
+            if thread_workers is not None
+            else ThreadPoolExecutor()
+        )
+        self.process_executor = (
+            ProcessPoolExecutor(max_workers=process_workers)
+            if process_workers is not None
+            else None
+        )
         self.state_manager = StateManager(db_path or "agent_state.db")
         self._initialize_system_prompt()
 
@@ -48,9 +60,18 @@ class CappuccinoAgent:
         *,
         llm: Optional[Any] = None,
         tool_manager: Optional[ToolManager] = None,
+        thread_workers: Optional[int] = None,
+        process_workers: Optional[int] = None,
     ) -> "CappuccinoAgent":
         """Instantiate agent and load state from the given database."""
-        self = cls(api_key=api_key, db_path=db_path, llm=llm, tool_manager=tool_manager)
+        self = cls(
+            api_key=api_key,
+            db_path=db_path,
+            llm=llm,
+            tool_manager=tool_manager,
+            thread_workers=thread_workers,
+            process_workers=process_workers,
+        )
         data = await self.state_manager.load()
         self.task_plan = data.get("task_plan", [])
         self.messages = data.get("history", self.messages)
@@ -97,23 +118,43 @@ class CappuccinoAgent:
         """Delegate to ToolManager cache storage."""
         await self.tool_manager.set_cached_result(key, value)
 
+    async def _run_sync(self, func, *args, cpu_bound: bool = False, **kwargs):
+        """Run blocking function in the configured executor."""
+        loop = asyncio.get_running_loop()
+        executor = (
+            self.process_executor if cpu_bound and self.process_executor else self.thread_executor
+        )
+        return await loop.run_in_executor(executor, lambda: func(*args, **kwargs))
+
     async def call_llm(self, prompt: str) -> str:
-        """Call the LLM or fallback stub and cache the result."""
+        """Call the LLM with emotion context and cache the result."""
         cache_key = f"llm:{prompt}"
         cached = await self.get_cached_result(cache_key)
         if cached is not None:
             return cached
 
+        from emotion_recognizer import detect_emotion
+
+        emotion = detect_emotion(prompt)
+        prompt_with_emotion = f"{prompt}\n[User sentiment: {emotion}]"
+
         if self.llm:
-            resp = await self.llm(prompt)
-            result = resp if isinstance(resp, str) else resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+            resp = await self.llm(prompt_with_emotion)
+            result = (
+                resp
+                if isinstance(resp, str)
+                else resp.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
         elif self.client:
             response = await self.client.chat.completions.create(
                 model="gpt-4.1",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": prompt_with_emotion}],
             )
             result = response.choices[0].message.content or ""
         else:
+            # Fallback stub preserves original behaviour for tests
             result = prompt[::-1]
 
         await self.set_cached_result(cache_key, result)
@@ -161,6 +202,7 @@ class CappuccinoAgent:
         results = await self.analyzer_agent.analyze(result_queue)
         return results
 
+
     async def close(self) -> None:
         """Close associated resources."""
         if hasattr(self.tool_manager, "close"):
@@ -168,23 +210,9 @@ class CappuccinoAgent:
             if asyncio.iscoroutinefunction(fn):
                 await fn()
             else:
-
                 fn()
 
         await self.state_manager.close()
-
-    async def get_status(self) -> Dict[str, Any]:
-        """Return a simple status dictionary."""
-        await asyncio.sleep(0)
-        return {"status": "ok"}
-
-    async def handle_tool_call_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """Acknowledge tool call result."""
-        await asyncio.sleep(0)
-        return {"ack": True, "received": result}
-
-    async def stream_responses(self, query: str) -> AsyncGenerator[str, None]:
-        """Yield dummy streaming responses."""
-        for idx in range(3):
-            await asyncio.sleep(0.1)
-            yield f"chunk {idx} for {query}"
+        self.thread_executor.shutdown(wait=False)
+        if self.process_executor:
+            self.process_executor.shutdown(wait=False)

@@ -1,16 +1,36 @@
 
 """FastAPI interface for Cappuccino agent."""
 
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, List
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from planner import Planner
+from state_manager import StateManager
+from goal_manager import GoalManager
+from tool_manager import ToolManager
 
 from cappuccino_agent import CappuccinoAgent
 
 
-agent = CappuccinoAgent()
+    async def stream_events(self, query: str) -> AsyncGenerator[str, None]:
+        """Yield thoughts and tool outputs as discrete text chunks."""
+        self._status = "streaming"
+        for i in range(2):
+            await asyncio.sleep(0.05)
+            yield f"thought {i}: {query}"
+        tool_result = await self.tool_manager.message_notify_user("ws", query)
+        yield f"tool_output: {tool_result['message']}"
+        self._status = "completed"
+
+
+tool_manager = ToolManager(db_path=":memory:")
+agent = CappuccinoAgent(tool_manager)
 app = FastAPI()
+
+state_manager = StateManager()
+planner = Planner()
+goal_manager = GoalManager(state_manager, {"interests": ["python"]})
 
 
 class RunRequest(BaseModel):
@@ -19,6 +39,14 @@ class RunRequest(BaseModel):
 
 class ToolCallResult(BaseModel):
     data: Dict[str, Any]
+
+
+class GoalList(BaseModel):
+    goals: List[str]
+
+
+class StepUpdate(BaseModel):
+    step: int
 
 
 @app.post("/agent/run")
@@ -32,6 +60,32 @@ async def agent_status() -> Dict[str, Any]:
     return await agent.get_status()
 
 
+@app.get("/agent/goals")
+async def agent_goals() -> Dict[str, Any]:
+    suggestions = await goal_manager.derive_goals()
+    confirmed = await goal_manager.current_goals()
+    return {"suggested": suggestions, "confirmed": confirmed}
+
+
+@app.post("/agent/goals")
+async def confirm_goals(goals: GoalList) -> Dict[str, Any]:
+    await goal_manager.confirm_goals(goals.goals)
+    plan = planner.create_plan(". ".join(goals.goals))
+    await state_manager.save_long_term_plan(plan, 0)
+    return {"plan": plan}
+
+
+@app.get("/agent/plan")
+async def get_plan() -> Dict[str, Any]:
+    return await state_manager.load_long_term_plan()
+
+
+@app.post("/agent/plan/advance")
+async def advance_plan(update: StepUpdate) -> Dict[str, Any]:
+    await state_manager.update_long_term_step(update.step)
+    return await state_manager.load_long_term_plan()
+
+
 @app.post("/agent/tool_call_result")
 async def agent_tool_call_result(result: ToolCallResult) -> Dict[str, Any]:
     return await agent.handle_tool_call_result(result.data)
@@ -43,6 +97,18 @@ async def agent_stream(websocket: WebSocket) -> None:
     try:
         query = await websocket.receive_text()
         async for chunk in agent.stream_responses(query):
+            await websocket.send_text(chunk)
+    except WebSocketDisconnect:
+        pass
+
+
+@app.websocket("/agent/events")
+async def agent_events(websocket: WebSocket) -> None:
+    await websocket.accept()
+    try:
+        data = await websocket.receive_json()
+        query = data.get("query", "")
+        async for chunk in agent.stream_events(query):
             await websocket.send_text(chunk)
     except WebSocketDisconnect:
         pass
