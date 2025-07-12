@@ -18,6 +18,7 @@ dependencies = [
     "fastapi",
     "python-dotenv",
     "textblob",
+    "httpx<0.28",
 ]
 
 [project.optional-dependencies]
