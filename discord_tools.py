@@ -4,7 +4,7 @@ Provides tools for Discord interactions through the ToolManager.
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from discord_manager import DiscordManager
 import logging
 import os

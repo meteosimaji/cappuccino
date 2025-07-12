@@ -4,12 +4,11 @@ Provides isolated execution environments for code execution and system operation
 """
 
 import docker
-import json
 import logging
 import os
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

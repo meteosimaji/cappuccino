@@ -11,11 +11,9 @@ from functools import wraps
 from typing import Any, Dict, Optional
 
 import aiosqlite
-from PIL import Image, ImageDraw, ImageFont
-from knowledge_graph import KnowledgeGraph
+from PIL import Image, ImageDraw
 from state_manager import StateManager
 
-from PIL import Image, ImageDraw
 
 
 class ToolExecutionError(Exception):
@@ -738,7 +736,7 @@ class ToolManager:
         raw_code = textwrap.dedent(response.choices[0].message.content or "")
         lines = raw_code.splitlines()
         if len(lines) > 1 and not lines[1].startswith(" "):
-            lines[1:] = ["    " + l for l in lines[1:]]
+            lines[1:] = ["    " + line for line in lines[1:]]
         code = "\n".join(lines)
 
         match = re.search(r"async def\s+(\w+)\s*\(", code)
