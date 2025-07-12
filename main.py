@@ -1,17 +1,6 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+"""Backward compatibility entrypoint.
 
-app = FastAPI()
+This module simply re-exports the FastAPI `app` instance from `api.py` so that
+commands like `uvicorn main:app` continue to work."""
 
-class UserRequest(BaseModel):
-    query: str
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-@app.post("/agent/run")
-async def run_agent(request: UserRequest):
-    # Placeholder for Cappuccino agent logic
-    return {"response": f"Processing query: {request.query}"}
-
+from api import app
