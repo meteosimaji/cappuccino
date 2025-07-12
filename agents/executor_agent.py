@@ -23,7 +23,15 @@ class ExecutorAgent:
 
             action = step.get("action", "")
             if self.llm:
-                result = await self.llm(action)
+                llm_result = await self.llm(action)
+                if isinstance(llm_result, dict):
+                    result = (
+                        llm_result.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
+                else:
+                    result = llm_result
             else:
                 result = action[::-1]
             await result_queue.put({"step": step.get("step"), "result": result})

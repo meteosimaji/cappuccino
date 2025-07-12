@@ -276,13 +276,28 @@ class CappuccinoAgent:
         plan_queue: asyncio.Queue = asyncio.Queue()
         result_queue: asyncio.Queue = asyncio.Queue()
 
+        await self.add_message("user", user_query)
+
         planner_task = asyncio.create_task(self.planner_agent.plan(user_query, plan_queue))
         executor_task = asyncio.create_task(self.executor_agent.execute(plan_queue, result_queue))
 
         await planner_task
         await executor_task
         results = await self.analyzer_agent.analyze(result_queue)
-        return results
+        if len(results) == 1 and isinstance(results[0], dict) and "result" in results[0]:
+            output = results[0]["result"]
+        else:
+            output = results
+
+        await self.add_message("assistant", str(output))
+        return output
+
+    async def stream_events(self, query: str) -> AsyncGenerator[str, None]:
+        """Yield placeholder events for streaming APIs."""
+        for i in range(2):
+            await asyncio.sleep(0.05)
+            yield f"thought {i}"
+        yield "tool_output:done"
 
 
     async def close(self) -> None:
