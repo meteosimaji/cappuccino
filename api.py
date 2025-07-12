@@ -7,12 +7,14 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 import os
 from openai import AsyncOpenAI
+from dotenv import load_dotenv
 from planner import Planner
 from state_manager import StateManager
 from goal_manager import GoalManager
 from tool_manager import ToolManager
 from cappuccino_agent import CappuccinoAgent
 
+load_dotenv()
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
@@ -38,6 +40,39 @@ class RunRequest(BaseModel):
     query: str
 
 
+class RunResponse(BaseModel):
+    text: str
+    images: List[str]
+
+
+async def call_openai(prompt: str) -> Dict[str, List[str]]:
+    resp = await openai_client.responses.create(
+        model="gpt-4.1",
+        tools=[
+            {"type": "web_search_preview"},
+            {"type": "code_interpreter", "container": {"type": "auto"}},
+            {"type": "image_generation"},
+        ],
+        input=[{"role": "user", "content": prompt}],
+    )
+
+    text_blocks: List[str] = []
+    images: List[str] = []
+    for item in resp.output:
+        if item.type == "message":
+            for block in item.content:
+                if getattr(block, "type", "") in {"output_text", "text"}:
+                    txt = getattr(block, "text", "").strip()
+                    if txt:
+                        text_blocks.append(txt)
+        elif item.type == "image_generation_call":
+            img_data = getattr(item, "result", None)
+            if img_data:
+                images.append(f"data:image/png;base64,{img_data}")
+
+    return {"text": "\n\n".join(text_blocks), "images": images}
+
+
 class ToolCallResult(BaseModel):
     data: Dict[str, Any]
 
@@ -57,10 +92,9 @@ class RealtimeSessionParams(BaseModel):
     voice: str = "verse"
 
 
-@app.post("/agent/run")
-async def run_agent(request: RunRequest) -> Dict[str, Any]:
-    result = await agent.run(request.query)
-    return {"result": result}
+@app.post("/agent/run", response_model=RunResponse)
+async def run_agent(request: RunRequest) -> Dict[str, List[str]]:
+    return await call_openai(request.query)
 
 
 @app.get("/agent/status")
