@@ -3,40 +3,28 @@ import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import pytest
-import pytest_asyncio
 
 from cappuccino_agent import CappuccinoAgent
-from tool_manager import ToolManager
 
 
 @pytest.mark.asyncio
-async def test_agent_runs_tool():
-    async def fake_llm(messages):
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "tool_calls": [
-                            {
-                                "function": {"name": "media_generate_speech", "arguments": "{\"text\": \"hi\", \"output_path\": \"out.wav\"}"}
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
-
-    tm = ToolManager(db_path=":memory:")
-    agent = CappuccinoAgent(llm=fake_llm, tool_manager=tm)
-    result = await agent.run("hi")
-    assert result[0]["error"] == "speech generation not implemented"
+async def test_agent_runs_without_llm():
+    agent = CappuccinoAgent(tool_manager=None, llm=None)
+    result = await agent.run("do this. then that")
+    assert result == [
+        {"step": 1, "result": "siht od"},
+        {"step": 2, "result": "taht neht"},
+    ]
 
 
 @pytest.mark.asyncio
-async def test_agent_text_response():
-    async def fake_llm(messages):
-        return {"choices": [{"message": {"content": "ok"}}]}
+async def test_agent_with_llm():
+    async def fake_llm(text):
+        return f"done:{text}"
 
-    agent = CappuccinoAgent(llm=fake_llm, tool_manager=ToolManager(db_path=":memory:"))
-    result = await agent.run("hi")
-    assert result == "ok"
+    agent = CappuccinoAgent(llm=fake_llm, tool_manager=None)
+    result = await agent.run("step one. step two")
+    assert result == [
+        {"step": 1, "result": "done:step one"},
+        {"step": 2, "result": "done:step two"},
+    ]

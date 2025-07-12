@@ -4,12 +4,13 @@ import json
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from openai import AsyncOpenAI
 
 from tool_manager import ToolManager
 from state_manager import StateManager
+from agents import PlannerAgent, ExecutorAgent, AnalyzerAgent
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -29,6 +30,9 @@ class CappuccinoAgent:
         self.llm = llm
 
         self.tool_manager = tool_manager or ToolManager(db_path or "agent_state.db")
+        self.planner_agent = PlannerAgent()
+        self.executor_agent = ExecutorAgent(self.tool_manager, llm)
+        self.analyzer_agent = AnalyzerAgent()
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
@@ -144,56 +148,18 @@ class CappuccinoAgent:
     async def run(
         self, user_query: str, tools_schema: Optional[List[Dict[str, Any]]] = None
     ) -> Any:
-        """Process one LLM call and handle a single round of tool execution."""
-        await self._add_message("user", user_query)
+        """Run the planner, executor and analyzer pipeline."""
 
+        plan_queue: asyncio.Queue = asyncio.Queue()
+        result_queue: asyncio.Queue = asyncio.Queue()
 
-        if self.llm is not None:
-            response = await self.llm(self.messages)
-            response_message = response["choices"][0]["message"]
-        else:
-            response = await self.client.chat.completions.create(
-                model="gpt-4.1",
-                messages=self.messages,
-                tools=tools_schema or [],
-                tool_choice="auto",
-            )
-            rm = response.choices[0].message
-            response_message = {
-                "role": rm.role,
-                "content": rm.content,
-                "tool_calls": rm.tool_calls,
-            }
+        planner_task = asyncio.create_task(self.planner_agent.plan(user_query, plan_queue))
+        executor_task = asyncio.create_task(self.executor_agent.execute(plan_queue, result_queue))
 
-        await self._add_message(
-            response_message.get("role", "assistant"),
-            response_message.get("content", "") or "",
-            response_message.get("tool_calls"),
-        )
-
-
-        if response_message.get("tool_calls"):
-            outputs = []
-            for tool_call in response_message["tool_calls"]:
-                if isinstance(tool_call, dict):
-                    function_name = tool_call["function"]["name"]
-                    function_args = json.loads(tool_call["function"]["arguments"])
-                else:
-                    function_name = tool_call.function.name
-                    function_args = json.loads(tool_call.function.arguments)
-                if hasattr(self.tool_manager, function_name):
-                    func = getattr(self.tool_manager, function_name)
-                    if asyncio.iscoroutinefunction(func):
-                        result = await func(**function_args)
-                    else:
-                        loop = asyncio.get_running_loop()
-                        result = await loop.run_in_executor(self.executor, func, **function_args)
-                    outputs.append(result)
-                else:
-                    outputs.append({"error": f"Tool '{function_name}' not found"})
-            return outputs
-        else:
-            return response_message.get("content")
+        await planner_task
+        await executor_task
+        results = await self.analyzer_agent.analyze(result_queue)
+        return results
 
     async def close(self) -> None:
         """Close associated resources."""
@@ -206,3 +172,19 @@ class CappuccinoAgent:
                 fn()
 
         await self.state_manager.close()
+
+    async def get_status(self) -> Dict[str, Any]:
+        """Return a simple status dictionary."""
+        await asyncio.sleep(0)
+        return {"status": "ok"}
+
+    async def handle_tool_call_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Acknowledge tool call result."""
+        await asyncio.sleep(0)
+        return {"ack": True, "received": result}
+
+    async def stream_responses(self, query: str) -> AsyncGenerator[str, None]:
+        """Yield dummy streaming responses."""
+        for idx in range(3):
+            await asyncio.sleep(0.1)
+            yield f"chunk {idx} for {query}"
