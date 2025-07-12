@@ -31,10 +31,16 @@ with connect("ws://localhost:8000/agent/events") as ws:
 ```
 
 ## Testing
-Execute unit tests using `pytest`:
+Install the project dependencies and run the unit tests with `pytest`:
 ```bash
+pip install -r requirements.txt
 pytest -q
 ```
+
+The integration script `test_integration.py` exercises Docker and Discord
+features. It requires a running Docker daemon and a valid `DISCORD_BOT_TOKEN`
+environment variable in order to fully execute. If these requirements are
+missing, the integration tests are skipped while the other unit tests still run.
 
 ## Design philosophy
 Key principles from `AGENTS.md`:
