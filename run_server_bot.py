@@ -1,7 +1,7 @@
 import asyncio
 import uvicorn
 
-from main import app
+from api import app
 from discordbot.bot import start_bot
 
 async def start_server():

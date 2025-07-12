@@ -13,9 +13,9 @@ Cappuccino aims to be a general‑purpose AI assistant. The project follows the 
 ## Running the server
 Start the FastAPI server with:
 ```bash
-uvicorn main:app --reload
+uvicorn api:app --reload
 ```
-This runs the minimal API defined in `main.py`.
+This runs the main API defined in `api.py`.
 
 ### Running API and Discord bot together
 To launch both the API server and the Discord bot simultaneously use
