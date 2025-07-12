@@ -33,5 +33,5 @@ class ExecutorAgent:
                 else:
                     result = llm_result
             else:
-                result = action[::-1]
+                raise RuntimeError("No LLM client configured")
             await result_queue.put({"step": step.get("step"), "result": result})

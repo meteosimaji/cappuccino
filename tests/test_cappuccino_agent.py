@@ -12,11 +12,8 @@ from cappuccino_agent import CappuccinoAgent
 @pytest.mark.asyncio
 async def test_agent_runs_without_llm():
     agent = CappuccinoAgent(tool_manager=None, llm=None)
-    result = await agent.run("do this. then that")
-    assert result == [
-        {"step": 1, "result": "siht od"},
-        {"step": 2, "result": "taht neht"},
-    ]
+    with pytest.raises(RuntimeError):
+        await agent.run("do this. then that")
 
 
 @pytest.mark.asyncio

@@ -18,8 +18,12 @@ async def test_cache_methods(tmp_path):
 @pytest.mark.asyncio
 async def test_agent_cache(tmp_path):
     tm = ToolManager(db_path=os.path.join(tmp_path, "db.sqlite"))
-    agent = CappuccinoAgent(tool_manager=tm)
+
+    async def fake_llm(text: str) -> str:
+        return "ok"
+
+    agent = CappuccinoAgent(tool_manager=tm, llm=fake_llm)
     response = await agent.call_llm("hello")
-    assert response == "olleh"
+    assert response == "ok"
     cached = await agent.get_cached_result("llm:hello")
-    assert cached == "olleh"
+    assert cached == "ok"

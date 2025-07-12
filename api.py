@@ -13,7 +13,7 @@ from goal_manager import GoalManager
 from tool_manager import ToolManager
 from cappuccino_agent import CappuccinoAgent
 
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "test"))
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 async def stream_events(query: str) -> AsyncGenerator[str, None]:
