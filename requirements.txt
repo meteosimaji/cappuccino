@@ -22,5 +22,6 @@ python-dotenv
 networkx
 aio_pika
 textblob
+httpx<0.28
 uvicorn
 httpx<0.28
