@@ -1486,7 +1486,7 @@ async def cmd_gpt(msg: discord.Message, user_text: str):
         await reply.edit(content=f"Error: {exc}")
         return
 
-    await reply.edit(content=response_text[:1900], attachments=files or None)
+    await reply.edit(content=response_text[:1900], attachments=files if files else [])
 
 # ──────────── 🎵  コマンド郡 ────────────
 
