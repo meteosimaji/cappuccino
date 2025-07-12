@@ -66,13 +66,38 @@ async def test_file_operations(tm, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_media_functions(tm, tmp_path):
+async def test_media_functions(tm, tmp_path, monkeypatch):
     img_path = tmp_path / "img.png"
     result = await tm.media_generate_image("hi", str(img_path))
     assert os.path.exists(result["path"])
     speech = await tm.media_generate_speech("hi", "out.wav")
     assert "error" in speech
 
+    import types, sys
+    monkeypatch.setitem(sys.modules, "pytesseract", types.SimpleNamespace(image_to_string=lambda img: "ocr"))
+    monkeypatch.setattr("PIL.Image.open", lambda p: "img")
+    ocr = await tm.media_analyze_image(str(img_path))
+    assert ocr["text"] == "ocr"
+    class DummyFile:
+        def __init__(self, path):
+            self.path = path
+        def __enter__(self):
+            return "src"
+        def __exit__(self, exc_type, exc, tb):
+            pass
+    class DummyRec:
+        def record(self, source):
+            return b"aud"
+        def recognize_sphinx(self, audio):
+            return "hi"
+    speech_mod = types.SimpleNamespace(AudioFile=DummyFile, Recognizer=DummyRec)
+    monkeypatch.setitem(sys.modules, "speech_recognition", speech_mod)
+    recog = await tm.media_recognize_speech("snd.wav")
+    assert recog["text"] == "hi"
+    cv2_mod = types.SimpleNamespace(VideoCapture=lambda p: types.SimpleNamespace(isOpened=lambda: True, read=lambda: (True, types.SimpleNamespace(mean=lambda axis=None: [1,2,3])), release=lambda: None))
+    monkeypatch.setitem(sys.modules, "cv2", cv2_mod)
+    desc = await tm.media_describe_video("v.mp4")
+    assert desc["avg_color"] == [1,2,3]
 
 @pytest.mark.asyncio
 async def test_info_search(tm, monkeypatch):
@@ -141,3 +166,4 @@ async def test_slide_functions(tm, tmp_path):
     assert os.path.exists(init["project"])
     present = await tm.slide_present(str(proj))
     assert present["status"] == "presenting"
+

@@ -438,6 +438,63 @@ class ToolManager:
             return {"error": "speech generation not implemented"}
 
 
+
+    @log_tool
+    async def media_analyze_image(self, image_path: str) -> Dict[str, Any]:
+        """Extract text from an image using pytesseract."""
+        try:
+            import pytesseract
+            from PIL import Image
+        except Exception:
+            return {"error": "pytesseract not available"}
+
+        def _ocr() -> Dict[str, Any]:
+            text = pytesseract.image_to_string(Image.open(image_path))
+            return {"text": text}
+
+        return await asyncio.to_thread(_ocr)
+
+    @log_tool
+    async def media_recognize_speech(self, audio_path: str) -> Dict[str, Any]:
+        """Transcribe speech from an audio file using SpeechRecognition."""
+        try:
+            import speech_recognition as sr
+        except Exception:
+            return {"error": "speech_recognition not available"}
+
+        def _recognize() -> Dict[str, Any]:
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(audio_path) as source:
+                audio = recognizer.record(source)
+            try:
+                text = recognizer.recognize_sphinx(audio)
+            except Exception:
+                return {"error": "recognition failed"}
+            return {"text": text}
+
+        return await asyncio.to_thread(_recognize)
+
+    @log_tool
+    async def media_describe_video(self, video_path: str) -> Dict[str, Any]:
+        """Return the average color of the first frame of a video."""
+        try:
+            import cv2
+        except Exception:
+            return {"error": "opencv not available"}
+
+        def _describe() -> Dict[str, Any]:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise ValueError("unable to open video")
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                raise ValueError("unable to read frame")
+            avg_color = frame.mean(axis=(0, 1))
+            return {"avg_color": [float(x) for x in avg_color]}
+
+        return await asyncio.to_thread(_describe)
+
     async def media_analyze_video(self, video_path: str) -> Dict[str, Any]:
         """Return basic metadata for a video file."""
         try:
