@@ -9,8 +9,16 @@ import time
 import logging
 from typing import Dict, Any
 
+import pytest
+
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+docker = pytest.importorskip("docker")
+try:
+    docker.from_env()
+except docker.errors.DockerException:
+    pytest.skip("Docker daemon not available")
 
 from docker_tools import DOCKER_TOOLS
 from discord_tools import DISCORD_TOOLS
