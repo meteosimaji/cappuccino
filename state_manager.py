@@ -3,6 +3,8 @@ import aiosqlite
 import json
 from typing import Any, Dict, List, Optional
 
+from knowledge_graph import KnowledgeGraph
+
 class StateManager:
     """Persist and restore Cappuccino agent state using SQLite."""
     def __init__(self, db_path: str = "agent_state.db") -> None:
@@ -69,3 +71,33 @@ class StateManager:
         """Update the current step while preserving plan and history."""
         data = await self.load()
         await self.save(data.get("task_plan", []), data.get("history", []), step)
+
+    # ------------------------------------------------------------------
+    # Knowledge graph persistence
+    # ------------------------------------------------------------------
+
+    async def load_graph(self) -> KnowledgeGraph:
+        """Load the persisted knowledge graph or return an empty one."""
+        conn = await self._get_conn()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS knowledge_graph (id INTEGER PRIMARY KEY, data TEXT)"
+        )
+        async with conn.execute(
+            "SELECT data FROM knowledge_graph WHERE id=1"
+        ) as cur:
+            row = await cur.fetchone()
+        if row and row[0]:
+            return KnowledgeGraph.from_json(row[0])
+        return KnowledgeGraph()
+
+    async def save_graph(self, graph: KnowledgeGraph) -> None:
+        """Persist the knowledge graph."""
+        conn = await self._get_conn()
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS knowledge_graph (id INTEGER PRIMARY KEY, data TEXT)"
+        )
+        await conn.execute(
+            "INSERT INTO knowledge_graph(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+            (graph.to_json(),),
+        )
+        await conn.commit()
