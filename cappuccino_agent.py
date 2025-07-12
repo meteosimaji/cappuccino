@@ -10,7 +10,9 @@ from openai import AsyncOpenAI
 
 from tool_manager import ToolManager
 from state_manager import StateManager
+from self_improver import SelfImprover
 from agents import PlannerAgent, ExecutorAgent, AnalyzerAgent
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -31,6 +33,7 @@ class CappuccinoAgent:
     ) -> None:
         self.client = AsyncOpenAI(api_key=api_key) if api_key and llm is None else None
         self.llm = llm
+        self.api_key = api_key
 
         self.tool_manager = tool_manager or ToolManager(db_path or "agent_state.db")
         self.planner_agent = PlannerAgent()
@@ -50,6 +53,7 @@ class CappuccinoAgent:
             else None
         )
         self.state_manager = StateManager(db_path or "agent_state.db")
+        self.self_improver = SelfImprover(self.state_manager, self.tool_manager, api_key)
         self._initialize_system_prompt()
 
     @classmethod
@@ -101,6 +105,11 @@ class CappuccinoAgent:
     async def advance_phase(self) -> None:
         self.current_phase_id += 1
         await self.state_manager.save(self.task_plan, self.messages, self.current_phase_id)
+        if self.self_improver:
+            try:
+                await self.self_improver.improve()
+            except Exception as exc:  # pragma: no cover - best effort
+                logging.error(f"SelfImprover failed: {exc}")
 
     @property
     def history(self) -> List[Dict[str, Any]]:
