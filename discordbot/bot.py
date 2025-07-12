@@ -22,7 +22,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
 
 # Load credentials from environment variables
-TOKEN = os.getenv("DISCORD_TOKEN", "")
+TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 
@@ -3315,7 +3315,7 @@ async def on_message(msg: discord.Message):
 async def start_bot():
     """Start the Discord bot."""
     if not TOKEN:
-        raise RuntimeError("DISCORD_TOKEN is not set. Check your environment variables or .env file")
+        raise RuntimeError("DISCORD_BOT_TOKEN is not set. Check your environment variables or .env file")
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set. Check your environment variables or .env file")
     await client.start(TOKEN)
