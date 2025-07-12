@@ -67,7 +67,7 @@ python chat_cli.py
 Exit the session with `exit` or `quit`.
 
 ## API CLI
-Use `agent_cli.py` to send a query to the `/agent/run` endpoint and save any
+Use `agent_cli.py` to send a prompt directly to the OpenAI API and save any
 generated images locally:
 
 ```bash

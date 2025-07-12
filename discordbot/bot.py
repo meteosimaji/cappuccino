@@ -13,6 +13,7 @@ from cappuccino_agent import CappuccinoAgent
 import json
 import feedparser
 import aiohttp
+from openai import AsyncOpenAI
 from bs4 import BeautifulSoup
 
 # 音声読み上げや文字起こし機能は削除したため関連ライブラリは不要
@@ -38,7 +39,6 @@ load_dotenv(os.path.join(ROOT_DIR, ".env"))
 # Load credentials from environment variables
 TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-CAPP_API_URL = os.getenv("CAPP_API_URL", "http://163.43.113.161:8000/agent/run")
 
 
 NEWS_CONF_FILE = os.path.join(ROOT_DIR, "news_channel.json")
@@ -122,26 +122,39 @@ WEATHER_CHANNEL_ID = _load_weather_channel()
 # Initialize CappuccinoAgent for GPT interactions
 cappuccino_agent = CappuccinoAgent(api_key=OPENAI_API_KEY)
 
-async def call_cappuccino_api(prompt: str) -> tuple[str, list[discord.File]]:
-    """Send query to Cappuccino API and return text and image files."""
-    async with aiohttp.ClientSession() as sess:
-        async with sess.post(CAPP_API_URL, json={"query": prompt}, timeout=120) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
+# Direct OpenAI client for bot commands
+openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-    text = data.get("text", "")
-    images = []
-    for i, img in enumerate(data.get("images", [])):
-        try:
-            _, b64 = img.split(",", 1)
-            binary = base64.b64decode(b64)
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-            tmp.write(binary)
-            tmp.close()
-            images.append(discord.File(tmp.name, filename=f"image_{i+1}.png"))
-        except Exception as e:
-            logger.error("failed to decode image: %s", e)
-    return text, images
+async def call_openai_api(prompt: str) -> tuple[str, list[discord.File]]:
+    """Send query directly to OpenAI and return text and generated images."""
+    resp = await openai_client.responses.create(
+        model="gpt-4.1",
+        tools=[
+            {"type": "web_search_preview"},
+            {"type": "code_interpreter", "container": {"type": "auto"}},
+            {"type": "image_generation"},
+        ],
+        input=[{"role": "user", "content": prompt}],
+    )
+
+    text_blocks: list[str] = []
+    images: list[discord.File] = []
+    for item in resp.output:
+        if item.type == "message":
+            for block in item.content:
+                if getattr(block, "type", "") in {"output_text", "text"}:
+                    txt = getattr(block, "text", "").strip()
+                    if txt:
+                        text_blocks.append(txt)
+        elif item.type == "image_generation_call":
+            img_data = getattr(item, "result", None)
+            if img_data:
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                tmp.write(base64.b64decode(img_data))
+                tmp.close()
+                images.append(discord.File(tmp.name, filename=f"image_{len(images)+1}.png"))
+
+    return "\n\n".join(text_blocks), images
 
 # ───────────────── Voice Transcription / TTS ─────────────────
 
@@ -1484,7 +1497,7 @@ async def cmd_gpt(msg: discord.Message, user_text: str):
 
     reply = await msg.reply("…")
     try:
-        response_text, files = await call_cappuccino_api(prompt)
+        response_text, files = await call_openai_api(prompt)
     except Exception as exc:
         await reply.edit(content=f"Error: {exc}")
         return
