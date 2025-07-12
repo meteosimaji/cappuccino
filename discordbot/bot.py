@@ -1,7 +1,17 @@
-import os, re, time, random, discord, tempfile, logging, datetime, asyncio, base64
+import os
+import re
+import time
+import random
+import discord
+import tempfile
+import logging
+import datetime
+import asyncio
 from discord import app_commands
 from cappuccino_agent import CappuccinoAgent
-import json, feedparser, aiohttp
+import json
+import feedparser
+import aiohttp
 from bs4 import BeautifulSoup
 
 # 音声読み上げや文字起こし機能は削除したため関連ライブラリは不要
@@ -544,7 +554,7 @@ def parse_message_link(link: str) -> tuple[int, int, int] | None:
         return None
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
     
-import asyncio, collections
+import collections
 
 def fmt_time(sec: int) -> str:
     m, s = divmod(int(sec), 60)
@@ -747,7 +757,7 @@ async def progress_updater(state: "MusicState"):
         pass
 
 # ──────────── 🖼 名言化 APIヘルパ ────────────
-import json, aiohttp, pathlib
+import pathlib
 
 FAKEQUOTE_URL = "https://api.voids.top/fakequote"
 
@@ -1424,14 +1434,36 @@ import asyncio
 
 
 async def cmd_gpt(msg: discord.Message, user_text: str):
-    """Handle the gpt command using CappuccinoAgent."""
+    """Handle the gpt command with tools and short conversation history."""
     if not user_text.strip():
         await msg.reply("質問を書いてね！")
         return
 
+    history = await _gather_reply_chain(msg, limit=3)
+
+    def format_history(messages: list[discord.Message]) -> str:
+        lines = []
+        for m in messages:
+            ts = m.created_at.strftime("%Y-%m-%d %H:%M")
+            content = _strip_bot_mention(m.content)
+            if content:
+                lines.append(f"{m.author.display_name} {ts} {content}")
+        return "\n".join(lines)
+
+    history_txt = format_history(history)
+    if history_txt:
+        prompt = f"###会話履歴\n{history_txt}\n###今回のメッセージ\n{user_text}"
+    else:
+        prompt = user_text
+
     reply = await msg.reply("…")
     try:
-        response = await cappuccino_agent.call_llm(user_text)
+        tools_schema = [
+            {"type": "web_search_preview"},
+            {"type": "code_interpreter", "container": {"type": "auto"}},
+            {"type": "image_generation"},
+        ]
+        response = await cappuccino_agent.call_llm_with_tools(prompt, tools_schema)
     except Exception as exc:
         await reply.edit(content=f"Error: {exc}")
         return
