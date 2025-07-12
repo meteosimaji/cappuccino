@@ -10,7 +10,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Global Docker manager instance
-docker_manager = DockerManager()
+try:
+    docker_manager = DockerManager()
+except Exception as exc:  # pragma: no cover - environment without Docker
+    docker_manager = None
+    logging.warning(f"DockerManager unavailable: {exc}")
 
 
 def container_create(image_name: str = None, container_name: str = "cappuccino-env", 

@@ -157,14 +157,16 @@ class CappuccinoAgent:
                 .get("content", "")
             )
         elif self.client:
-            response = await self.client.chat.completions.create(
-                model="gpt-4.1",
-                messages=[{"role": "user", "content": prompt_with_emotion}],
-            )
-            result = response.choices[0].message.content or ""
+            try:
+                response = await self.client.chat.completions.create(
+                    model="gpt-4.1",
+                    messages=[{"role": "user", "content": prompt_with_emotion}],
+                )
+                result = response.choices[0].message.content or ""
+            except Exception as exc:
+                raise RuntimeError(f"LLM request failed: {exc}")
         else:
-            # Fallback stub preserves original behaviour for tests
-            result = prompt[::-1]
+            raise RuntimeError("No LLM client configured")
 
         await self.set_cached_result(cache_key, result)
         return result
@@ -179,16 +181,18 @@ class CappuccinoAgent:
         messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
 
         if not self.client:
-            # Fallback for tests without an OpenAI client
-            return await self.call_llm(prompt)
+            raise RuntimeError("No LLM client configured")
 
         if hasattr(self.client, "responses"):
             # New Responses API with built-in tools
-            first = await self.client.responses.create(
-                model="gpt-4.1",
-                input=messages,
-                tools=tools_schema,
-            )
+            try:
+                first = await self.client.responses.create(
+                    model="gpt-4.1",
+                    input=messages,
+                    tools=tools_schema,
+                )
+            except Exception as exc:
+                raise RuntimeError(f"LLM request failed: {exc}")
 
             for item in getattr(first, "output", []):
                 if getattr(item, "type", "") == "function_call":
@@ -211,10 +215,13 @@ class CappuccinoAgent:
                         }
                     )
 
-            followup = await self.client.responses.create(
-                model="gpt-4.1",
-                input=messages,
-            )
+            try:
+                followup = await self.client.responses.create(
+                    model="gpt-4.1",
+                    input=messages,
+                )
+            except Exception as exc:
+                raise RuntimeError(f"LLM request failed: {exc}")
 
             for out in getattr(followup, "output", []):
                 if getattr(out, "type", "") == "text":
@@ -222,11 +229,14 @@ class CappuccinoAgent:
             return ""
 
         # Fallback to Chat Completions function-calling
-        response = await self.client.chat.completions.create(
-            model="gpt-4.1",
-            messages=messages,
-            tools=tools_schema,
-        )
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-4.1",
+                messages=messages,
+                tools=tools_schema,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"LLM request failed: {exc}")
 
         message = response.choices[0].message
         if message.tool_calls:
