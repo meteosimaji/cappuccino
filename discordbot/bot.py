@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from dataclasses import dataclass
 from typing import Any
 
-from poker import PokerMatch, PokerView
+from .poker import PokerMatch, PokerView
 
 
 # ───────────────── TOKEN / KEY ─────────────────
