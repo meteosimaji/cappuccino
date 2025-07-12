@@ -29,7 +29,10 @@ from .poker import PokerMatch, PokerView
 # ───────────────── TOKEN / KEY ─────────────────
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Load environment variables from .env if present
+# Load environment variables
+# 1. Project root .env
+load_dotenv(os.path.join(ROOT_DIR, "..", ".env"))
+# 2. discordbot/.env for overrides
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
 
 # Load credentials from environment variables
