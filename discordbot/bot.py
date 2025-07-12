@@ -1439,7 +1439,7 @@ async def cmd_gpt(msg: discord.Message, user_text: str):
         await msg.reply("質問を書いてね！")
         return
 
-    history = await _gather_reply_chain(msg, limit=3)
+    history = await _gather_reply_chain(msg, limit=20)
 
     def format_history(messages: list[discord.Message]) -> str:
         lines = []
