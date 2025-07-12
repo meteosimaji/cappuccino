@@ -1,15 +1,15 @@
-import pathlib
 import sys
+from pathlib import Path
 
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 import asyncio
 import os
 
 import logging
 import pytest
+
 from tool_manager import ToolManager, ToolExecutionError
-
-
+import cv2
 
 @pytest.mark.asyncio
 async def test_file_read_and_append(tmp_path):
@@ -101,8 +101,6 @@ async def test_media_analyze_video(monkeypatch):
             return True
 
         def get(self, prop):
-            import cv2
-
             if prop == cv2.CAP_PROP_FRAME_COUNT:
                 return 10
             if prop == cv2.CAP_PROP_FPS:
@@ -115,8 +113,6 @@ async def test_media_analyze_video(monkeypatch):
 
         def release(self):
             pass
-
-    import cv2
 
     monkeypatch.setattr("cv2.VideoCapture", lambda path: DummyCap(path))
     result = await tm.media_analyze_video("dummy.mp4")

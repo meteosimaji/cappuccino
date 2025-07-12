@@ -17,6 +17,7 @@ dependencies = [
     "openai",
     "fastapi",
     "python-dotenv",
+    "textblob",
 ]
 
 [project.optional-dependencies]

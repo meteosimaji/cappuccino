@@ -3,14 +3,16 @@ import asyncio
 import json
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from typing import Any, Dict, List, Optional, AsyncGenerator
 
 from openai import AsyncOpenAI
 
 from tool_manager import ToolManager
 from state_manager import StateManager
 from self_improver import SelfImprover
+from agents import PlannerAgent, ExecutorAgent, AnalyzerAgent
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -25,16 +27,31 @@ class CappuccinoAgent:
 
         tool_manager: Optional[ToolManager] = None,
         llm: Optional[Any] = None,
+        *,
+        thread_workers: Optional[int] = None,
+        process_workers: Optional[int] = None,
     ) -> None:
         self.client = AsyncOpenAI(api_key=api_key) if api_key and llm is None else None
         self.llm = llm
         self.api_key = api_key
 
         self.tool_manager = tool_manager or ToolManager(db_path or "agent_state.db")
+        self.planner_agent = PlannerAgent()
+        self.executor_agent = ExecutorAgent(self.tool_manager, llm)
+        self.analyzer_agent = AnalyzerAgent()
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
         self.current_phase_id = 0
-        self.executor = ThreadPoolExecutor()
+        self.thread_executor = (
+            ThreadPoolExecutor(max_workers=thread_workers)
+            if thread_workers is not None
+            else ThreadPoolExecutor()
+        )
+        self.process_executor = (
+            ProcessPoolExecutor(max_workers=process_workers)
+            if process_workers is not None
+            else None
+        )
         self.state_manager = StateManager(db_path or "agent_state.db")
         self.self_improver = SelfImprover(self.state_manager, self.tool_manager, api_key)
         self._initialize_system_prompt()
@@ -47,9 +64,18 @@ class CappuccinoAgent:
         *,
         llm: Optional[Any] = None,
         tool_manager: Optional[ToolManager] = None,
+        thread_workers: Optional[int] = None,
+        process_workers: Optional[int] = None,
     ) -> "CappuccinoAgent":
         """Instantiate agent and load state from the given database."""
-        self = cls(api_key=api_key, db_path=db_path, llm=llm, tool_manager=tool_manager)
+        self = cls(
+            api_key=api_key,
+            db_path=db_path,
+            llm=llm,
+            tool_manager=tool_manager,
+            thread_workers=thread_workers,
+            process_workers=process_workers,
+        )
         data = await self.state_manager.load()
         self.task_plan = data.get("task_plan", [])
         self.messages = data.get("history", self.messages)
@@ -101,23 +127,43 @@ class CappuccinoAgent:
         """Delegate to ToolManager cache storage."""
         await self.tool_manager.set_cached_result(key, value)
 
+    async def _run_sync(self, func, *args, cpu_bound: bool = False, **kwargs):
+        """Run blocking function in the configured executor."""
+        loop = asyncio.get_running_loop()
+        executor = (
+            self.process_executor if cpu_bound and self.process_executor else self.thread_executor
+        )
+        return await loop.run_in_executor(executor, lambda: func(*args, **kwargs))
+
     async def call_llm(self, prompt: str) -> str:
-        """Call the LLM or fallback stub and cache the result."""
+        """Call the LLM with emotion context and cache the result."""
         cache_key = f"llm:{prompt}"
         cached = await self.get_cached_result(cache_key)
         if cached is not None:
             return cached
 
+        from emotion_recognizer import detect_emotion
+
+        emotion = detect_emotion(prompt)
+        prompt_with_emotion = f"{prompt}\n[User sentiment: {emotion}]"
+
         if self.llm:
-            resp = await self.llm(prompt)
-            result = resp if isinstance(resp, str) else resp.get("choices", [{}])[0].get("message", {}).get("content", "")
+            resp = await self.llm(prompt_with_emotion)
+            result = (
+                resp
+                if isinstance(resp, str)
+                else resp.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
         elif self.client:
             response = await self.client.chat.completions.create(
                 model="gpt-4.1",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": prompt_with_emotion}],
             )
             result = response.choices[0].message.content or ""
         else:
+            # Fallback stub preserves original behaviour for tests
             result = prompt[::-1]
 
         await self.set_cached_result(cache_key, result)
@@ -152,56 +198,19 @@ class CappuccinoAgent:
     async def run(
         self, user_query: str, tools_schema: Optional[List[Dict[str, Any]]] = None
     ) -> Any:
-        """Process one LLM call and handle a single round of tool execution."""
-        await self._add_message("user", user_query)
+        """Run the planner, executor and analyzer pipeline."""
 
+        plan_queue: asyncio.Queue = asyncio.Queue()
+        result_queue: asyncio.Queue = asyncio.Queue()
 
-        if self.llm is not None:
-            response = await self.llm(self.messages)
-            response_message = response["choices"][0]["message"]
-        else:
-            response = await self.client.chat.completions.create(
-                model="gpt-4.1",
-                messages=self.messages,
-                tools=tools_schema or [],
-                tool_choice="auto",
-            )
-            rm = response.choices[0].message
-            response_message = {
-                "role": rm.role,
-                "content": rm.content,
-                "tool_calls": rm.tool_calls,
-            }
+        planner_task = asyncio.create_task(self.planner_agent.plan(user_query, plan_queue))
+        executor_task = asyncio.create_task(self.executor_agent.execute(plan_queue, result_queue))
 
-        await self._add_message(
-            response_message.get("role", "assistant"),
-            response_message.get("content", "") or "",
-            response_message.get("tool_calls"),
-        )
+        await planner_task
+        await executor_task
+        results = await self.analyzer_agent.analyze(result_queue)
+        return results
 
-
-        if response_message.get("tool_calls"):
-            outputs = []
-            for tool_call in response_message["tool_calls"]:
-                if isinstance(tool_call, dict):
-                    function_name = tool_call["function"]["name"]
-                    function_args = json.loads(tool_call["function"]["arguments"])
-                else:
-                    function_name = tool_call.function.name
-                    function_args = json.loads(tool_call.function.arguments)
-                if hasattr(self.tool_manager, function_name):
-                    func = getattr(self.tool_manager, function_name)
-                    if asyncio.iscoroutinefunction(func):
-                        result = await func(**function_args)
-                    else:
-                        loop = asyncio.get_running_loop()
-                        result = await loop.run_in_executor(self.executor, func, **function_args)
-                    outputs.append(result)
-                else:
-                    outputs.append({"error": f"Tool '{function_name}' not found"})
-            return outputs
-        else:
-            return response_message.get("content")
 
     async def close(self) -> None:
         """Close associated resources."""
@@ -210,7 +219,9 @@ class CappuccinoAgent:
             if asyncio.iscoroutinefunction(fn):
                 await fn()
             else:
-
                 fn()
 
         await self.state_manager.close()
+        self.thread_executor.shutdown(wait=False)
+        if self.process_executor:
+            self.process_executor.shutdown(wait=False)

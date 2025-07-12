@@ -17,6 +17,19 @@ uvicorn main:app --reload
 ```
 This runs the minimal API defined in `main.py`.
 
+## API usage
+`api.py` exposes REST endpoints and WebSockets. To stream agent thoughts and tool
+outputs connect to `/agent/events` and send a JSON object with a `query` field.
+
+```python
+from websockets.sync.client import connect
+import json
+
+with connect("ws://localhost:8000/agent/events") as ws:
+    ws.send(json.dumps({"query": "hello"}))
+    print(ws.recv())  # first chunk
+```
+
 ## Testing
 Execute unit tests using `pytest`:
 ```bash
