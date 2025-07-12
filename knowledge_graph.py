@@ -35,12 +35,18 @@ class KnowledgeGraph:
 
     def to_json(self) -> str:
         """Serialize the graph to a JSON string."""
-        data = json_graph.node_link_data(self.graph)
+        # Explicitly set edges="links" to preserve current behavior and
+        # silence FutureWarning about the default changing in NetworkX 3.6.
+        data = json_graph.node_link_data(self.graph, edges="links")
         return json.dumps(data)
 
     @classmethod
     def from_json(cls, data: str) -> "KnowledgeGraph":
         """Create a KnowledgeGraph instance from JSON."""
         instance = cls()
-        instance.graph = json_graph.node_link_graph(json.loads(data), multigraph=True)
+        # Use edges="links" here for compatibility with graphs serialized by
+        # ``to_json`` above.
+        instance.graph = json_graph.node_link_graph(
+            json.loads(data), multigraph=True, edges="links"
+        )
         return instance

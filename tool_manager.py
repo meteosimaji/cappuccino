@@ -361,7 +361,9 @@ class ToolManager:
             return {"error": str(e)}
         if not os.path.exists(abs_path):
             return {"error": f"File not found: {abs_path}"}
-        content = await asyncio.to_thread(lambda: open(abs_path, "r").read())
+        # Read the file in a helper function so the file handle is properly
+        # closed and no ResourceWarning is triggered.
+        content = await asyncio.to_thread(self._read_text_file, abs_path)
         lines = content.splitlines(True)
         if start_line is not None or end_line is not None:
             lines = lines[start_line:end_line]
@@ -400,6 +402,11 @@ class ToolManager:
             f.seek(0)
             f.write(content)
             f.truncate()
+
+    def _read_text_file(self, abs_path: str) -> str:
+        """Helper to read a file's text content safely."""
+        with open(abs_path, "r") as f:
+            return f.read()
     # ------------------------------------------------------------------
     # Media generation
     # ------------------------------------------------------------------
