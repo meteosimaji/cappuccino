@@ -10,35 +10,8 @@ from state_manager import StateManager
 from goal_manager import GoalManager
 from tool_manager import ToolManager
 
+from cappuccino_agent import CappuccinoAgent
 
-
-class CappuccinoAgent:
-    """Minimal asynchronous CappuccinoAgent stub."""
-
-    def __init__(self, tool_manager: ToolManager) -> None:
-        self._status = "idle"
-        self.tool_manager = tool_manager
-
-    async def run(self, query: str) -> Dict[str, Any]:
-        self._status = "running"
-        await asyncio.sleep(0.1)  # placeholder for real work
-        self._status = "completed"
-        return {"response": f"Processed query: {query}"}
-
-    async def get_status(self) -> Dict[str, Any]:
-        await asyncio.sleep(0)
-        return {"status": self._status}
-
-    async def handle_tool_call_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        await asyncio.sleep(0)
-        return {"ack": True, "received": result}
-
-    async def stream_responses(self, query: str) -> AsyncGenerator[str, None]:
-        self._status = "streaming"
-        for i in range(3):
-            await asyncio.sleep(0.1)
-            yield f"chunk {i} for {query}"
-        self._status = "completed"
 
     async def stream_events(self, query: str) -> AsyncGenerator[str, None]:
         """Yield thoughts and tool outputs as discrete text chunks."""
