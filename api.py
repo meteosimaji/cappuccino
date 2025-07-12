@@ -1,14 +1,18 @@
 
-"""FastAPI interface for Cappuccino agent."""
+"""FastAPI interface for Cappuccino agent and Realtime utilities."""
 
 from typing import Any, AsyncGenerator, Dict, List
 import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+import os
+from openai import AsyncOpenAI
 from planner import Planner
 from state_manager import StateManager
 from goal_manager import GoalManager
 from tool_manager import ToolManager
+
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", "test"))
 
 from cappuccino_agent import CappuccinoAgent
 
@@ -45,6 +49,13 @@ class GoalList(BaseModel):
 
 class StepUpdate(BaseModel):
     step: int
+
+
+class RealtimeSessionParams(BaseModel):
+    """Parameters for creating a Realtime API session."""
+
+    model: str = "gpt-4o-realtime-preview-2025-06-03"
+    voice: str = "verse"
 
 
 @app.post("/agent/run")
@@ -87,6 +98,15 @@ async def advance_plan(update: StepUpdate) -> Dict[str, Any]:
 @app.post("/agent/tool_call_result")
 async def agent_tool_call_result(result: ToolCallResult) -> Dict[str, Any]:
     return await agent.handle_tool_call_result(result.data)
+
+
+@app.get("/session")
+async def realtime_session(params: RealtimeSessionParams = RealtimeSessionParams()) -> Dict[str, Any]:
+    """Create a Realtime API session and return the ephemeral token."""
+    resp = await openai_client.beta.realtime.sessions.create(
+        model=params.model, voice=params.voice
+    )
+    return resp.model_dump()
 
 
 @app.websocket("/agent/stream")
