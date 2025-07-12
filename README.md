@@ -57,3 +57,11 @@ Run a simple interactive chat loop from the terminal:
 python chat_cli.py
 ```
 Exit the session with `exit` or `quit`.
+
+## API CLI
+Use `agent_cli.py` to send a query to the `/agent/run` endpoint and save any
+generated images locally:
+
+```bash
+python agent_cli.py "青い空と白い雲の風景画"
+```

@@ -11,14 +11,14 @@ import api
 
 @pytest.mark.asyncio
 async def test_run_endpoint(monkeypatch):
-    async def fake_run(self, query):
-        return "ok"
+    async def fake_call(prompt):
+        return {"text": "ok", "images": []}
 
-    monkeypatch.setattr(api.CappuccinoAgent, "run", fake_run)
+    monkeypatch.setattr(api, "call_openai", fake_call)
     client = TestClient(api.app)
     resp = client.post("/agent/run", json={"query": "hello"})
     assert resp.status_code == 200
-    assert resp.json()["result"] == "ok"
+    assert resp.json()["text"] == "ok"
 
 
 def test_websocket_events(monkeypatch):
