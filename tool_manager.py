@@ -3,6 +3,9 @@ import logging
 import os
 import json
 import inspect
+import re
+import subprocess
+import tempfile
 from functools import wraps
 from typing import Any, Dict, Optional
 
@@ -10,6 +13,7 @@ import aiosqlite
 from PIL import Image, ImageDraw, ImageFont
 from knowledge_graph import KnowledgeGraph
 from state_manager import StateManager
+
 from PIL import Image, ImageDraw
 
 
@@ -116,6 +120,12 @@ class ToolManager:
                     content TEXT
             )"""
         )
+        await conn.execute(
+            """CREATE TABLE IF NOT EXISTS tools (
+                    name TEXT PRIMARY KEY,
+                    code TEXT
+            )"""
+        )
         await conn.commit()
 
 
@@ -126,6 +136,16 @@ class ToolManager:
             "INSERT INTO history (role, content) VALUES (?, ?)",
             (role, content),
 
+        )
+        await conn.commit()
+
+    async def _register_tool(self, name: str, code: str) -> None:
+        """Persist a learned tool to the database."""
+        conn = await self._get_db_connection()
+        await conn.execute(
+            "INSERT INTO tools(name, code) VALUES(?, ?)"
+            " ON CONFLICT(name) DO UPDATE SET code=excluded.code",
+            (name, code),
         )
         await conn.commit()
 
@@ -628,16 +648,26 @@ class ToolManager:
         """Analyze a failed task and create a new tool via LLM.
 
         The LLM should respond with a complete async Python function
-        definition. The function will be added to this instance.
+        definition. The function will be validated, stored and added
+        to this instance.
         """
 
         from openai import AsyncOpenAI
+
+        # gather recent user comments for additional context
+        conn = await self._get_db_connection()
+        async with conn.execute(
+            "SELECT content FROM history WHERE role='user' ORDER BY id DESC LIMIT 5"
+        ) as cur:
+            comments = [row[0] async for row in cur]
+        user_notes = "\n".join(reversed(comments))
 
         prompt = (
             "You are a developer assistant that writes new async Python "
             "functions for the Cappuccino ToolManager. "
             f"The user task was: {task_description}. "
-            f"It failed with: {error_message}. "
+            f"It failed with logs: {error_message}. "
+            f"Recent user comments: {user_notes}. "
             "Provide only the function code."
         )
 
@@ -647,18 +677,53 @@ class ToolManager:
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
         )
-
         code = response.choices[0].message.content
-        local_ns: Dict[str, Any] = {}
-        try:
-            exec(code, {}, local_ns)
-        except Exception as e:  # pragma: no cover - exec failure path
-            return {"error": f"Failed to exec generated code: {e}"}
 
-        func = next((v for v in local_ns.values() if callable(v)), None)
-        if not func:
+        match = re.search(r"async def\s+(\w+)\s*\(", code)
+        if not match:
             return {"error": "No function definition found"}
+        func_name = match.group(1)
 
-        setattr(self, func.__name__, func)
-        return {"name": func.__name__, "code": code}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool_file = os.path.join(tmpdir, "tool.py")
+            with open(tool_file, "w") as f:
+                f.write(code)
+            test_file = os.path.join(tmpdir, "test_tool.py")
+            with open(test_file, "w") as f:
+                f.write(
+                    "import asyncio\nfrom tool import %s\n\n"
+                    "async def test_async():\n    assert asyncio.iscoroutinefunction(%s)\n"
+                    % (func_name, func_name)
+                )
 
+            try:
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["ruff", "check", tool_file],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    cwd=tmpdir,
+                )
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["pytest", "-q", test_file],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    cwd=tmpdir,
+                )
+            except subprocess.CalledProcessError as exc:
+                return {"error": "validation_failed", "details": exc.stderr}
+
+            local_ns: Dict[str, Any] = {}
+            try:
+                exec(code, {}, local_ns)
+            except Exception as e:  # pragma: no cover - exec failure path
+                return {"error": f"Failed to exec generated code: {e}"}
+
+            func = local_ns.get(func_name)
+
+        setattr(self, func_name, func)
+        await self._register_tool(func_name, code)
+        return {"name": func_name, "code": code}
