@@ -4,12 +4,13 @@ import os
 import json
 import inspect
 from functools import wraps
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional
 
 import aiosqlite
 from PIL import Image, ImageDraw, ImageFont
 from knowledge_graph import KnowledgeGraph
 from state_manager import StateManager
+from PIL import Image, ImageDraw
 
 
 class ToolExecutionError(Exception):

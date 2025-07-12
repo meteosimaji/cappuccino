@@ -1,7 +1,7 @@
-import sys, pathlib; sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-import asyncio
-import os
-import pathlib
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import pytest
 

@@ -20,6 +20,13 @@ class StateManager:
                         value TEXT
                 )"""
             )
+            await self._conn.execute(
+                """CREATE TABLE IF NOT EXISTS long_term_plan (
+                        id INTEGER PRIMARY KEY,
+                        plan TEXT,
+                        current_step INTEGER
+                )"""
+            )
             await self._conn.commit()
         return self._conn
 
@@ -73,6 +80,45 @@ class StateManager:
         await self.save(data.get("task_plan", []), data.get("history", []), step)
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Long-term planning helpers
+    # ------------------------------------------------------------------
+    async def save_long_term_plan(
+        self, plan: List[Dict[str, Any]], current_step: int = 0
+    ) -> None:
+        """Persist a long-term plan and progress."""
+        conn = await self._get_conn()
+        await conn.execute(
+            """
+            INSERT INTO long_term_plan(id, plan, current_step)
+            VALUES(1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET plan=excluded.plan, current_step=excluded.current_step
+            """,
+            (json.dumps(plan), current_step),
+        )
+        await conn.commit()
+
+    async def load_long_term_plan(self) -> Dict[str, Any]:
+        """Return the stored long-term plan and current progress."""
+        conn = await self._get_conn()
+        async with conn.execute(
+            "SELECT plan, current_step FROM long_term_plan WHERE id=1"
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            return {"plan": json.loads(row[0]), "current_step": row[1]}
+        return {"plan": [], "current_step": 0}
+
+    async def update_long_term_step(self, step: int) -> None:
+        """Update progress for the long-term plan."""
+        conn = await self._get_conn()
+        await conn.execute(
+            "UPDATE long_term_plan SET current_step=? WHERE id=1",
+            (step,),
+        )
+        await conn.commit()
+
+    # ------------------------------------------------------------------
     # Knowledge graph persistence
     # ------------------------------------------------------------------
 
@@ -99,5 +145,8 @@ class StateManager:
         await conn.execute(
             "INSERT INTO knowledge_graph(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
             (graph.to_json(),),
+        )
+        await conn.commit()
+
         )
         await conn.commit()
