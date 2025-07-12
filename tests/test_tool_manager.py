@@ -151,3 +151,69 @@ async def test_shell_wait_no_session(caplog):
     assert any("shell_wait" in r.getMessage() for r in caplog.records)
     assert "error" in result
 
+
+@pytest.mark.asyncio
+async def test_media_analyze_image(monkeypatch):
+    tm = ToolManager(db_path=":memory:")
+
+    import types, sys
+    pytesseract = types.SimpleNamespace(image_to_string=lambda img: "text")
+    monkeypatch.setitem(sys.modules, "pytesseract", pytesseract)
+    monkeypatch.setattr("PIL.Image.open", lambda p: "img")
+
+    result = await tm.media_analyze_image("img.png")
+    assert result["text"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_media_recognize_speech(monkeypatch):
+    tm = ToolManager(db_path=":memory:")
+
+    import types, sys
+
+    class DummyAudioFile:
+        def __init__(self, path):
+            self.path = path
+        def __enter__(self):
+            return "src"
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+    class DummyRecognizer:
+        def record(self, source):
+            return b"aud"
+        def recognize_sphinx(self, audio):
+            return "hello"
+
+    speech_mod = types.SimpleNamespace(AudioFile=DummyAudioFile, Recognizer=DummyRecognizer)
+    monkeypatch.setitem(sys.modules, "speech_recognition", speech_mod)
+
+    result = await tm.media_recognize_speech("sound.wav")
+    assert result["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_media_describe_video(monkeypatch):
+    tm = ToolManager(db_path=":memory:")
+
+    class DummyFrame:
+        def mean(self, axis=None):
+            return [1.0, 2.0, 3.0]
+
+    class DummyCap:
+        def __init__(self, path):
+            self.path = path
+        def isOpened(self):
+            return True
+        def read(self):
+            return True, DummyFrame()
+        def release(self):
+            pass
+
+    import types, sys
+    cv2_mod = types.SimpleNamespace(VideoCapture=lambda path: DummyCap(path))
+    monkeypatch.setitem(sys.modules, "cv2", cv2_mod)
+
+    result = await tm.media_describe_video("video.mp4")
+    assert result["avg_color"] == [1.0, 2.0, 3.0]
+
