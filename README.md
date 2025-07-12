@@ -17,6 +17,14 @@ uvicorn main:app --reload
 ```
 This runs the minimal API defined in `main.py`.
 
+### Running API and Discord bot together
+To launch both the API server and the Discord bot simultaneously use
+`run_server_bot.py`:
+
+```bash
+python run_server_bot.py
+```
+
 ## API usage
 `api.py` exposes REST endpoints and WebSockets. To stream agent thoughts and tool
 outputs connect to `/agent/events` and send a JSON object with a `query` field.
