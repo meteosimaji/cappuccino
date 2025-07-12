@@ -169,6 +169,79 @@ class CappuccinoAgent:
         await self.set_cached_result(cache_key, result)
         return result
 
+    async def call_llm_with_tools(
+        self,
+        prompt: str,
+        tools_schema: List[Dict[str, Any]],
+    ) -> str:
+        """Call the LLM using function calling with the provided tools."""
+        messages: List[Dict[str, Any]] = [
+            {"role": "user", "content": prompt}
+        ]
+
+        if not self.client:
+            # Fallback for tests without an OpenAI client
+            return await self.call_llm(prompt)
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4.1",
+            messages=messages,
+            tools=tools_schema,
+        )
+
+        message = response.choices[0].message
+        if message.tool_calls:
+            tool_calls_payload = []
+            for tc in message.tool_calls:
+                if hasattr(tc, "model_dump"):
+                    tool_calls_payload.append(tc.model_dump())
+                else:
+                    tool_calls_payload.append(
+                        {
+                            "id": getattr(tc, "id", ""),
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                            "type": "function",
+                        }
+                    )
+
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content or "",
+                    "tool_calls": tool_calls_payload,
+                }
+            )
+            for tool_call in message.tool_calls:
+                func_name = tool_call.function.name
+                try:
+                    args = json.loads(tool_call.function.arguments or "{}")
+                except Exception:
+                    args = {}
+                if hasattr(self.tool_manager, func_name):
+                    func = getattr(self.tool_manager, func_name)
+                    result = await func(**args)
+                else:
+                    result = {"error": f"tool {func_name} not found"}
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(result),
+                    }
+                )
+
+            followup = await self.client.chat.completions.create(
+                model="gpt-4.1",
+                messages=messages,
+            )
+            return followup.choices[0].message.content or ""
+
+        return message.content or ""
+
     async def _add_message(
         self,
         role: str,

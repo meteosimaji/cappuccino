@@ -147,6 +147,3 @@ class StateManager:
             (graph.to_json(),),
         )
         await conn.commit()
-
-        )
-        await conn.commit()

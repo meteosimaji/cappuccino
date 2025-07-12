@@ -13,15 +13,13 @@ from tool_manager import ToolManager
 from cappuccino_agent import CappuccinoAgent
 
 
-    async def stream_events(self, query: str) -> AsyncGenerator[str, None]:
-        """Yield thoughts and tool outputs as discrete text chunks."""
-        self._status = "streaming"
-        for i in range(2):
-            await asyncio.sleep(0.05)
-            yield f"thought {i}: {query}"
-        tool_result = await self.tool_manager.message_notify_user("ws", query)
-        yield f"tool_output: {tool_result['message']}"
-        self._status = "completed"
+async def stream_events(query: str) -> AsyncGenerator[str, None]:
+    """Yield thoughts and tool outputs as discrete text chunks."""
+    for i in range(2):
+        await asyncio.sleep(0.05)
+        yield f"thought {i}: {query}"
+    tool_result = await tool_manager.message_notify_user("ws", query)
+    yield f"tool_output: {tool_result['message']}"
 
 
 tool_manager = ToolManager(db_path=":memory:")
