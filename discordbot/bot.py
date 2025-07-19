@@ -21,8 +21,8 @@ from typing import Iterable, Union, Optional
 
 # 音声読み上げや文字起こし機能は削除したため関連ライブラリは不要
 from urllib.parse import urlparse, parse_qs, urlunparse
-from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
+from logging_config import setup_logging
 
 from dataclasses import dataclass
 from typing import Any
@@ -239,9 +239,7 @@ async def call_openai_api(
 # ───────────────── Voice Transcription / TTS ─────────────────
 
 # ───────────────── Logger ─────────────────
-handler = RotatingFileHandler('bot.log', maxBytes=1_000_000, backupCount=5, encoding='utf-8')
-logging.basicConfig(level=logging.INFO, handlers=[handler])
-logging.getLogger('discord').setLevel(logging.WARNING)
+setup_logging("bot.log")
 logger = logging.getLogger(__name__)
 
 # チャンネル型の許可タプル (Text / Thread / Stage)
