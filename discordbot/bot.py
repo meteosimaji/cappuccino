@@ -441,7 +441,7 @@ HELP_PAGES: list[tuple[str, str]] = [
                 "/barcode <text>, y!barcode <text> : バーコード画像を生成",
                 "/tex <式>, y!tex <式> : TeX 数式を画像に変換",
 
-                "/news <#channel>, y!news <#channel> : ニュース投稿チャンネルを設定",
+                "/news <#channel>, y!news <#channel> : ニュース投稿チャンネルを設定 (本文引用)",
                 "/eew <#channel>, y!eew <#channel> : 地震速報チャンネルを設定",
                 "/weather <#channel>, y!weather <#channel> : 天気予報チャンネルを設定",
 
@@ -515,7 +515,7 @@ HELP_PAGES: list[tuple[str, str]] = [
                 "/say <text> : 入力内容をそのまま返答 (2000文字超はファイル)",
                 "/date [timestamp] : 日付を表示。省略時は現在時刻",
                 "/dice または y!XdY : サイコロを振る (例: 2d6)",
-                "/news <#channel> : ニュース投稿先を設定 (管理者のみ)",
+                "/news <#channel> : ニュース投稿先を設定 (本文引用の速報, 管理者のみ)",
                 "/eew <#channel> : 地震速報の通知先を設定 (管理者のみ)",
                 "/weather <#channel> : 天気予報の投稿先を設定 (管理者のみ)",
                 "/poker [@user] : 友達やBOTと1vs1ポーカー対戦",
@@ -2504,6 +2504,22 @@ async def _fetch_thumbnail(url: str) -> str | None:
         logger.debug("thumb fetch failed for %s: %s", url, e)
         return None
 
+async def _fetch_article_body(url: str) -> str | None:
+    """元記事から本文テキストを抽出"""
+    try:
+        url = _resolve_google_news_url(url)
+        sess = await _get_session()
+        async with sess.get(url, timeout=10) as resp:
+            html = await resp.text()
+        soup = BeautifulSoup(html, "html.parser")
+        node = soup.find("article") or soup
+        texts = [p.get_text(strip=True) for p in node.find_all("p")]
+        text = " ".join(texts)
+        return text if text else None
+    except Exception as e:
+        logger.debug("body fetch failed for %s: %s", url, e)
+        return None
+
 # --------------- ニュース送信 ---------------
 async def send_latest_news(channel: discord.TextChannel):
     feed   = feedparser.parse(NEWS_FEED_URL)
@@ -2523,7 +2539,9 @@ async def send_latest_news(channel: discord.TextChannel):
     # 1 件ずつ Discord に Embed 送信
     for ent in new_entries:
         raw_desc = re.sub(r"<.*?>", "", ent.get("summary", ""))
-        summary  = (raw_desc[:MAX_DESC_LEN] + "…") if len(raw_desc) > MAX_DESC_LEN else raw_desc
+        body = await _fetch_article_body(ent.link)
+        text = body or raw_desc
+        summary = (text[:MAX_DESC_LEN] + "…") if len(text) > MAX_DESC_LEN else text
 
         # 日次まとめ用に保存
         daily_list = daily_news.get(today, [])
