@@ -10,6 +10,8 @@ import tempfile
 from functools import wraps
 from typing import Any, Dict, Optional
 
+from aiohttp import web
+
 import aiosqlite
 from PIL import Image, ImageDraw
 from state_manager import StateManager
@@ -128,6 +130,17 @@ class ToolManager:
 
     async def close(self) -> None:
         """Explicitly close the database connection."""
+        for proc in list(self.service_processes.values()):
+            try:
+                if isinstance(proc, asyncio.subprocess.Process):
+                    if proc.returncode is None:
+                        proc.kill()
+                        await proc.wait()
+                else:
+                    await proc['runner'].cleanup()
+            except Exception:
+                pass
+        self.service_processes.clear()
         if self.db_connection is not None:
             await self.db_connection.close()
             self.db_connection = None
@@ -326,6 +339,20 @@ class ToolManager:
         await conn.commit()
         return {"task_id": task_id, "schedule": schedule}
 
+    @log_tool
+    async def agent_list_tasks(self) -> Dict[str, Any]:
+        """Return all tasks with phase, status and schedule."""
+        conn = await self._get_db_connection()
+        async with conn.execute(
+            "SELECT id, phase, status, schedule FROM tasks"
+        ) as cur:
+            rows = await cur.fetchall()
+        tasks = [
+            {"id": row[0], "phase": row[1], "status": row[2], "schedule": row[3]}
+            for row in rows
+        ]
+        return {"tasks": tasks}
+
     # ------------------------------------------------------------------
     # Messaging
     # ------------------------------------------------------------------
@@ -498,17 +525,24 @@ class ToolManager:
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
         """Generate speech audio from text and save as an MP3 file."""
         try:
+            output_path = self._validate_path(output_path)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        try:
             from gtts import gTTS  # type: ignore
+        except Exception as e:  # pragma: no cover - import error branch
+            return {"error": str(e)}
 
-            def _generate() -> None:
-                tts = gTTS(text)
-                tts.save(output_path)
+        def _generate() -> None:
+            tts = gTTS(text)
+            tts.save(output_path)
 
+        try:
             await asyncio.to_thread(_generate)
-            # Placeholder implementation still returns an error for now
-            return {"error": "speech generation not implemented"}
-        except Exception:
-            return {"error": "speech generation not implemented"}
+            return {"path": output_path}
+        except Exception as e:
+            return {"error": str(e)}
 
 
 
@@ -534,6 +568,74 @@ class ToolManager:
             import speech_recognition as sr
         except Exception:
             return {"error": "speech_recognition not available"}
+
+        def _recognize() -> Dict[str, Any]:
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(audio_path) as source:
+                audio = recognizer.record(source)
+            try:
+                text = recognizer.recognize_sphinx(audio)
+            except Exception:
+                return {"error": "recognition failed"}
+            return {"text": text}
+
+        return await asyncio.to_thread(_recognize)
+
+    @log_tool
+    async def image_classify(self, image_path: str) -> Dict[str, Any]:
+        """Classify objects in an image using torchvision."""
+        try:
+            import torch
+            from torchvision import models
+            from torchvision.models import MobileNet_V2_Weights
+            from PIL import Image
+        except Exception:
+            return {"error": "torchvision not available"}
+
+        def _classify() -> Dict[str, Any]:
+            weights = MobileNet_V2_Weights.DEFAULT
+            model = models.mobilenet_v2(weights=weights)
+            model.eval()
+            preprocess = weights.transforms()
+            img = Image.open(image_path)
+            with torch.no_grad():
+                batch = preprocess(img).unsqueeze(0)
+                output = model(batch)[0]
+                probs = torch.nn.functional.softmax(output, dim=0)
+                idx = int(probs.argmax())
+                label = weights.meta["categories"][idx]
+                score = float(probs[idx])
+            return {"label": label, "score": score}
+
+        try:
+            return await asyncio.to_thread(_classify)
+        except Exception as e:
+            return {"error": str(e)}
+
+    @log_tool
+    async def audio_transcribe(self, audio_path: str) -> Dict[str, Any]:
+        """Transcribe speech from an audio file using Whisper or SpeechRecognition."""
+        try:
+            from faster_whisper import WhisperModel
+        except Exception:
+            WhisperModel = None  # type: ignore
+
+        if WhisperModel is not None:
+            def _whisper() -> Dict[str, Any]:
+                model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                segments, _ = model.transcribe(audio_path)
+                text = "".join(seg.text for seg in segments)
+                return {"text": text.strip()}
+
+            try:
+                return await asyncio.to_thread(_whisper)
+            except Exception:
+                pass
+
+        try:
+            import speech_recognition as sr
+        except Exception:
+            return {"error": "no transcription model available"}
 
         def _recognize() -> Dict[str, Any]:
             recognizer = sr.Recognizer()
@@ -756,20 +858,61 @@ class ToolManager:
 
     @log_tool
     async def service_expose_port(self, port: int = 8000, directory: str = ".") -> Dict[str, Any]:
-        """Expose a simple HTTP service on the given port."""
-        # Placeholder implementation currently disabled for security
-        return {"error": "service management not implemented"}
+        """Expose a simple HTTP service serving files from directory."""
+        try:
+            directory = self._validate_path(directory)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        app = web.Application()
+        app.router.add_static("/", directory, show_index=True)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        actual_port = site._server.sockets[0].getsockname()[1]
+        self.service_processes[actual_port] = {"runner": runner, "site": site}
+        return {"status": "running", "port": actual_port}
 
 
     @log_tool
 
     async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
-        return {"error": "service management not implemented"}
+        try:
+            source_dir = self._validate_path(source_dir)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        script = os.path.join(source_dir, "build.sh")
+        if not os.path.exists(script):
+            return {"error": "build script not found"}
+
+        process = await asyncio.create_subprocess_shell(
+            f"bash {script}", cwd=source_dir
+        )
+        self.service_processes[process.pid] = process
+        await process.wait()
+        self.service_processes.pop(process.pid, None)
+        return {"status": "completed", "returncode": process.returncode}
 
     @log_tool
     async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
+        try:
+            source_dir = self._validate_path(source_dir)
+        except ValueError as e:
+            return {"error": str(e)}
 
-        return {"error": "service management not implemented"}
+        script = os.path.join(source_dir, "deploy.sh")
+        if not os.path.exists(script):
+            return {"error": "deploy script not found"}
+
+        process = await asyncio.create_subprocess_shell(
+            f"bash {script}", cwd=source_dir
+        )
+        self.service_processes[process.pid] = process
+        await process.wait()
+        self.service_processes.pop(process.pid, None)
+        return {"status": "completed", "returncode": process.returncode}
 
     # ------------------------------------------------------------------
     # Slide presentation (placeholders)

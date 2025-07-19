@@ -70,8 +70,19 @@ async def test_media_functions(tm, tmp_path, monkeypatch):
     img_path = tmp_path / "img.png"
     result = await tm.media_generate_image("hi", str(img_path))
     assert os.path.exists(result["path"])
-    speech = await tm.media_generate_speech("hi", "out.wav")
-    assert "error" in speech
+
+    class DummyTTS:
+        def __init__(self, text):
+            self.text = text
+        def save(self, path):
+            with open(path, "wb") as f:
+                f.write(b"data")
+
+    monkeypatch.setattr("gtts.gTTS", DummyTTS)
+    out_file = tmp_path / "speech.mp3"
+    speech = await tm.media_generate_speech("hi", str(out_file))
+    assert speech == {"path": str(out_file)}
+    assert out_file.exists()
 
     import types
     import sys
@@ -135,6 +146,18 @@ async def test_service_placeholders(tm):
         tm.service_expose_port,
         tm.service_deploy_frontend,
         tm.service_deploy_backend,
+        tm.browser_navigate,
+        tm.browser_view,
+        tm.browser_click,
+        tm.browser_input,
+        tm.browser_move_mouse,
+        tm.browser_press_key,
+        tm.browser_select_option,
+        tm.browser_save_image,
+        tm.browser_scroll_up,
+        tm.browser_scroll_down,
+        tm.browser_console_exec,
+        tm.browser_console_view,
     ]
     for func in funcs:
         arg_count = func.__code__.co_argcount - 1

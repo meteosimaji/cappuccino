@@ -1,39 +1,38 @@
 # YoneRai Discord Bot
 
-## 概要
-YoneRai Discord Bot は音楽再生、翻訳、AI 質問など多機能な Bot です。`y!` や `y?` で始まるテキストコマンド、または Discord のスラッシュコマンドから操作できます。
+## Overview
+YoneRai is a multi purpose Discord bot that supports music playback, AI powered utilities and various chat tools. Commands can be invoked with the traditional `y!`/`y?` prefix or via Discord slash commands.
 
-## 主な機能
-### 🎵 音楽
-- **再生**: `y!play` / `/play` — キーワード検索・URL・音声ファイルをキューへ追加。
-- **キュー操作**: `/queue` で Skip / Shuffle / Loop などをボタンから実行。
-- **シーク/早送り/巻き戻し** など主要なプレイヤー機能をサポート。
+## Features
+### 🎵 Music
+- `y!play` or `/play` to queue songs from links, keywords or attached files.
+- Control the queue with `/queue` and buttons for Skip, Shuffle, Loop and Pause.
+- Seek, rewind and fast forward tracks.
+- Leave the voice channel with `/stop` or `y!stop`.
 
-
-### 🤖 AI / ツール
-- **AI 質問**: `y? <質問>` / `/gpt <質問>` — GPT‑4.1 へ質問できます。
-- **QRコード作成**: `y!qr <テキスト>` / `/qr <テキスト>` — 入力文字列から QR コード画像を生成します。
-- **バーコード作成**: `y!barcode <テキスト>` / `/barcode <テキスト>` — Code128 形式のバーコード画像を生成します。
-- **TeX 数式**: `y!tex <数式>` / `/tex <数式>` — TeX 表記の数式を画像に変換します。
+### 🤖 AI / Tools
+- Ask GPT‑4.1 with `y? <question>` or `/gpt <question>`.
+- Generate QR codes and barcodes using `/qr` and `/barcode`.
+- Render LaTeX formulas with `/tex` or `y!tex`.
 
 ### その他
+- Translate messages by adding a flag reaction.
+- Show user or server info with `/user` and `/server`.
+- Roll dice using `/dice` or `y!XdY` (e.g. `2d6`).
+- Challenge a friend to `/poker`.
+- Bulk delete with `/purge`.
+- `/help` displays all available commands.
 
-翻訳リアクション、ユーザー情報表示、ダイスロールに加え、`y!poker [@ユーザー]` / `/poker [@ユーザー]` でヘッズアップポーカーを楽しめます。指定がない場合は BOT が相手です。
-`/help` コマンドで利用可能な操作一覧を確認できます。
+### 自動通知
+- `/news <#channel>` posts hourly Google News articles using excerpts from the article body with a thumbnail.
+- `/eew <#channel>` enables real‑time earthquake warnings.
+- `/weather <#channel>` posts hourly weather forecasts.
 
-管理者は `/news <#channel>` または `y!news <#channel>` でニュース投稿先を設定できます。設定後、BOT の再起動後も自動的に再開され、毎正時 (1:00、2:00 ...) に Google ニュースの要約をサムネ付きの埋め込みメッセージで投稿します。
-管理者は `/eew <#channel>` または `y!eew <#channel>` で地震速報の投稿先も設定でき、最新の地震情報が自動通知されます。
-
-
-## インストール
-1. Python 3.11 以上を用意してください。
-2. 依存ライブラリをインストールします。
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. `.env.example` を `.env` にコピーし、自身の `DISCORD_BOT_TOKEN` と `OPENAI_API_KEY` を設定します。
-4. `ffmpeg` をインストールした上で以下を実行します。
+## Installation
+1. Install Python 3.11 or later.
+2. `pip install -r requirements.txt` to install dependencies.
+3. Copy `.env.example` to `.env` and fill in `DISCORD_BOT_TOKEN` and `OPENAI_API_KEY`.
+4. Install `ffmpeg` and run:
    ```bash
    python bot.py
    ```
-
