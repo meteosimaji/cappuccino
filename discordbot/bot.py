@@ -1898,13 +1898,20 @@ async def cmd_forward(msg: discord.Message, arg: str):
 
 
 async def cmd_purge(msg: discord.Message, arg: str):
-    """
-    一括削除
-    ─────────────────────────
-    • y!purge <数>                       … 直近 <数> 件を削除（上限 1000）
-    • y!purge <リンク>                   … 指定メッセージ“より後”を全削除
-    • y!purge <リンク1> <リンク2?>       … 2 リンク間を全削除（両端も削除）
-    ─────────────────────────
+    """メッセージをまとめて削除するコマンド。
+
+    ``y!purge`` の形式では従来通りスペース区切りで指定するが、
+    ``/purge`` ではリンクを別々の入力欄に分け、さらに削除対象
+    ユーザーを複数指定できるようにする。利用例::
+
+        y!purge 100
+        y!purge <link1>
+        y!purge <link1> <link2> @userA @userB
+
+    - ``<数>``  : 直近のメッセージを指定数だけ削除（上限 1000）
+    - ``<リンク>`` : 指定メッセージより後を全削除
+    - ``<リンク1> <リンク2>`` : 2 つのリンク間を削除（両端も削除）
+    - ``@user`` : 削除対象ユーザーを追加指定（任意・複数可）
     """
     if not msg.guild:
         return await msg.reply("サーバー内でのみ使用できます。")
@@ -1913,10 +1920,27 @@ async def cmd_purge(msg: discord.Message, arg: str):
     if not tokens:
         return await msg.reply("`y!purge <数|リンク>` の形式で指定してね！")
 
+    # ユーザー指定（@mention または ID）を抽出
+    user_ids: list[int] = []
+    remain: list[str] = []
+    for t in tokens:
+        if t.startswith("<@") and t.endswith(">"):
+            uid = t.removeprefix("<@").removeprefix("!").removesuffix(">")
+            if uid.isdigit():
+                user_ids.append(int(uid))
+            else:
+                remain.append(t)
+        elif t.isdigit() and t != tokens[0] and len(remain) >= 2:
+            # treat as user id when more than two tokens provided
+            user_ids.append(int(t))
+        else:
+            remain.append(t)
+    tokens = remain
+
     # ---------- 数を指定 ----------
     if tokens[0].isdigit():
         limit = min(int(tokens[0]), 1000)
-        return await _purge_count(msg, limit)
+        return await _purge_count(msg, limit, user_ids)
 
     # ---------- 1‑リンク or 2‑リンク ----------
     links = tokens[:2]  # 2 個まで拾う
@@ -1955,14 +1979,22 @@ async def cmd_purge(msg: discord.Message, arg: str):
         return await msg.reply("最初のメッセージが見つかりません。")
 
     # ------- 1 リンク（anchor1 より後を削除） -------
+    def _check(m: discord.Message) -> bool:
+        if m.id == msg.id:
+            return False
+        if user_ids and m.author.id not in user_ids:
+            return False
+        return True
+
     if len(ids) == 1:
-        deleted = await ch.purge(after=anchor1, check=lambda m: m.id != msg.id)
-        # anchor1 自身も削除
-        try:
-            await anchor1.delete()
-            deleted.append(anchor1)
-        except discord.NotFound:
-            pass
+        deleted = await ch.purge(after=anchor1, check=_check)
+        # anchor1 自身も削除（対象ユーザー指定が無いか、対象の場合のみ）
+        if not user_ids or anchor1.author.id in user_ids:
+            try:
+                await anchor1.delete()
+                deleted.append(anchor1)
+            except discord.NotFound:
+                pass
         return await msg.channel.send(f"🧹 {len(deleted)}件削除しました！", delete_after=5)
 
     # ------- 2 リンク（anchor1 と anchor2 の間を削除） -------
@@ -1974,29 +2006,37 @@ async def cmd_purge(msg: discord.Message, arg: str):
     older, newer = (anchor1, anchor2) if anchor1.created_at < anchor2.created_at else (anchor2, anchor1)
 
     # purge(before=, after=) で間を一気に
-    deleted = await ch.purge(after=older, before=newer, check=lambda m: True)
+    deleted = await ch.purge(after=older, before=newer, check=_check)
 
-    # 両端も削除
+    # 両端も削除（対象ユーザー指定が無いか、対象の場合のみ）
     for m in (older, newer):
-        try:
-            await m.delete()
-            deleted.append(m)
-        except discord.NotFound:
-            pass
+        if not user_ids or m.author.id in user_ids:
+            try:
+                await m.delete()
+                deleted.append(m)
+            except discord.NotFound:
+                pass
 
     await msg.channel.send(f"🧹 {len(deleted)}件削除しました！", delete_after=5)
 
 
 # ------------------------------------------------------------------
 # 旧ロジック（件数指定）は関数に切り出して流用
-async def _purge_count(msg: discord.Message, limit: int):
+async def _purge_count(msg: discord.Message, limit: int, user_ids: list[int] | None = None):
     ch   = msg.channel
     perms_user = ch.permissions_for(msg.author)
     perms_bot  = ch.permissions_for(msg.guild.me)
     if not (perms_user.manage_messages and perms_bot.manage_messages):
         return await msg.reply("管理メッセージ権限が足りません。", delete_after=5)
 
-    deleted = await ch.purge(limit=limit, check=lambda m: m.id != msg.id)
+    def _check(m: discord.Message) -> bool:
+        if m.id == msg.id:
+            return False
+        if user_ids and m.author.id not in user_ids:
+            return False
+        return True
+
+    deleted = await ch.purge(limit=limit, check=_check)
     await msg.channel.send(f"🧹 {len(deleted)}件削除しました！", delete_after=5)
 
 async def cmd_qr(msg: discord.Message, text: str) -> None:
@@ -3253,11 +3293,27 @@ async def sc_forward(itx: discord.Interaction, time: str | None = None):
 
 
 @tree.command(name="purge", description="メッセージを一括削除")
-@app_commands.describe(arg="削除数またはメッセージリンク")
-async def sc_purge(itx: discord.Interaction, arg: str):
+@app_commands.describe(
+    start="削除数または1つ目のメッセージリンク",
+    end="2つ目のメッセージリンク (任意)",
+    user1="削除対象ユーザー1 (任意)",
+    user2="削除対象ユーザー2 (任意)",
+    user3="削除対象ユーザー3 (任意)",
+)
+async def sc_purge(
+    itx: discord.Interaction,
+    start: str,
+    end: str | None = None,
+    user1: discord.User | None = None,
+    user2: discord.User | None = None,
+    user3: discord.User | None = None,
+):
 
     try:
         await itx.response.defer()
+        users = [u for u in (user1, user2, user3) if u]
+        arg = start if end is None else f"{start} {end}"
+        arg += " " + " ".join(u.mention for u in users) if users else ""
         await cmd_purge(SlashMessage(itx), arg)
     except Exception as e:
         await itx.followup.send(f"エラー発生: {e}")
