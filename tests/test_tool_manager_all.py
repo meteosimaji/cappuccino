@@ -70,8 +70,19 @@ async def test_media_functions(tm, tmp_path, monkeypatch):
     img_path = tmp_path / "img.png"
     result = await tm.media_generate_image("hi", str(img_path))
     assert os.path.exists(result["path"])
-    speech = await tm.media_generate_speech("hi", "out.wav")
-    assert "error" in speech
+
+    class DummyTTS:
+        def __init__(self, text):
+            self.text = text
+        def save(self, path):
+            with open(path, "wb") as f:
+                f.write(b"data")
+
+    monkeypatch.setattr("gtts.gTTS", DummyTTS)
+    out_file = tmp_path / "speech.mp3"
+    speech = await tm.media_generate_speech("hi", str(out_file))
+    assert speech == {"path": str(out_file)}
+    assert out_file.exists()
 
     import types
     import sys
