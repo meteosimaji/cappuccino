@@ -10,6 +10,8 @@ import tempfile
 from functools import wraps
 from typing import Any, Dict, Optional
 
+from aiohttp import web
+
 import aiosqlite
 from PIL import Image, ImageDraw
 from state_manager import StateManager
@@ -70,6 +72,17 @@ class ToolManager:
 
     async def close(self) -> None:
         """Explicitly close the database connection."""
+        for proc in list(self.service_processes.values()):
+            try:
+                if isinstance(proc, asyncio.subprocess.Process):
+                    if proc.returncode is None:
+                        proc.kill()
+                        await proc.wait()
+                else:
+                    await proc['runner'].cleanup()
+            except Exception:
+                pass
+        self.service_processes.clear()
         if self.db_connection is not None:
             await self.db_connection.close()
             self.db_connection = None
@@ -756,20 +769,61 @@ class ToolManager:
 
     @log_tool
     async def service_expose_port(self, port: int = 8000, directory: str = ".") -> Dict[str, Any]:
-        """Expose a simple HTTP service on the given port."""
-        # Placeholder implementation currently disabled for security
-        return {"error": "service management not implemented"}
+        """Expose a simple HTTP service serving files from directory."""
+        try:
+            directory = self._validate_path(directory)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        app = web.Application()
+        app.router.add_static("/", directory, show_index=True)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        actual_port = site._server.sockets[0].getsockname()[1]
+        self.service_processes[actual_port] = {"runner": runner, "site": site}
+        return {"status": "running", "port": actual_port}
 
 
     @log_tool
 
     async def service_deploy_frontend(self, source_dir: str) -> Dict[str, Any]:
-        return {"error": "service management not implemented"}
+        try:
+            source_dir = self._validate_path(source_dir)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        script = os.path.join(source_dir, "build.sh")
+        if not os.path.exists(script):
+            return {"error": "build script not found"}
+
+        process = await asyncio.create_subprocess_shell(
+            f"bash {script}", cwd=source_dir
+        )
+        self.service_processes[process.pid] = process
+        await process.wait()
+        self.service_processes.pop(process.pid, None)
+        return {"status": "completed", "returncode": process.returncode}
 
     @log_tool
     async def service_deploy_backend(self, source_dir: str) -> Dict[str, Any]:
+        try:
+            source_dir = self._validate_path(source_dir)
+        except ValueError as e:
+            return {"error": str(e)}
 
-        return {"error": "service management not implemented"}
+        script = os.path.join(source_dir, "deploy.sh")
+        if not os.path.exists(script):
+            return {"error": "deploy script not found"}
+
+        process = await asyncio.create_subprocess_shell(
+            f"bash {script}", cwd=source_dir
+        )
+        self.service_processes[process.pid] = process
+        await process.wait()
+        self.service_processes.pop(process.pid, None)
+        return {"status": "completed", "returncode": process.returncode}
 
     # ------------------------------------------------------------------
     # Slide presentation (placeholders)

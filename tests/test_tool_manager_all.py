@@ -155,17 +155,13 @@ async def test_browser_and_service_placeholders(tm):
         tm.browser_scroll_down,
         tm.browser_console_exec,
         tm.browser_console_view,
-        tm.service_expose_port,
-        tm.service_deploy_frontend,
-        tm.service_deploy_backend,
     ]
     for func in funcs:
         arg_count = func.__code__.co_argcount - 1
         if arg_count == 0:
             result = await func()
         elif arg_count == 1:
-            arg = 1 if 'service_expose_port' in func.__name__ else "x"
-            result = await func(arg)
+            result = await func("x")
         else:
             result = await func("x", "y")
         assert "error" in result
