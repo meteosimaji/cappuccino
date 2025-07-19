@@ -47,6 +47,34 @@ TOOLS_SCHEMA: List[Dict] = [
     {
         "type": "function",
         "function": {
+            "name": "image_classify",
+            "description": "Classify objects in an image using a lightweight model.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string"}
+                },
+                "required": ["image_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "audio_transcribe",
+            "description": "Transcribe speech from an audio file using Whisper or SpeechRecognition.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "audio_path": {"type": "string"}
+                },
+                "required": ["audio_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "media_describe_video",
             "description": "Return the average color of the first frame of a video.",
             "parameters": {

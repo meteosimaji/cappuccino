@@ -488,6 +488,74 @@ class ToolManager:
         return await asyncio.to_thread(_recognize)
 
     @log_tool
+    async def image_classify(self, image_path: str) -> Dict[str, Any]:
+        """Classify objects in an image using torchvision."""
+        try:
+            import torch
+            from torchvision import models
+            from torchvision.models import MobileNet_V2_Weights
+            from PIL import Image
+        except Exception:
+            return {"error": "torchvision not available"}
+
+        def _classify() -> Dict[str, Any]:
+            weights = MobileNet_V2_Weights.DEFAULT
+            model = models.mobilenet_v2(weights=weights)
+            model.eval()
+            preprocess = weights.transforms()
+            img = Image.open(image_path)
+            with torch.no_grad():
+                batch = preprocess(img).unsqueeze(0)
+                output = model(batch)[0]
+                probs = torch.nn.functional.softmax(output, dim=0)
+                idx = int(probs.argmax())
+                label = weights.meta["categories"][idx]
+                score = float(probs[idx])
+            return {"label": label, "score": score}
+
+        try:
+            return await asyncio.to_thread(_classify)
+        except Exception as e:
+            return {"error": str(e)}
+
+    @log_tool
+    async def audio_transcribe(self, audio_path: str) -> Dict[str, Any]:
+        """Transcribe speech from an audio file using Whisper or SpeechRecognition."""
+        try:
+            from faster_whisper import WhisperModel
+        except Exception:
+            WhisperModel = None  # type: ignore
+
+        if WhisperModel is not None:
+            def _whisper() -> Dict[str, Any]:
+                model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                segments, _ = model.transcribe(audio_path)
+                text = "".join(seg.text for seg in segments)
+                return {"text": text.strip()}
+
+            try:
+                return await asyncio.to_thread(_whisper)
+            except Exception:
+                pass
+
+        try:
+            import speech_recognition as sr
+        except Exception:
+            return {"error": "no transcription model available"}
+
+        def _recognize() -> Dict[str, Any]:
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(audio_path) as source:
+                audio = recognizer.record(source)
+            try:
+                text = recognizer.recognize_sphinx(audio)
+            except Exception:
+                return {"error": "recognition failed"}
+            return {"text": text}
+
+        return await asyncio.to_thread(_recognize)
+
+    @log_tool
     async def media_describe_video(self, video_path: str) -> Dict[str, Any]:
         """Return the average color of the first frame of a video."""
         try:

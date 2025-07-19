@@ -217,3 +217,112 @@ async def test_media_describe_video(monkeypatch):
     result = await tm.media_describe_video("video.mp4")
     assert result["avg_color"] == [1.0, 2.0, 3.0]
 
+
+@pytest.mark.asyncio
+async def test_image_classify(monkeypatch):
+    tm = ToolManager(db_path=":memory:")
+
+    import types
+    import sys
+    import contextlib
+
+    class DummyInput:
+        def unsqueeze(self, dim):
+            return self
+
+    def preprocess(img):
+        return DummyInput()
+
+    class DummyModel:
+        def eval(self):
+            pass
+
+        def __call__(self, batch):
+            return [[0.2, 0.8]]
+
+    dummy_weights = types.SimpleNamespace(
+        DEFAULT=types.SimpleNamespace(
+            meta={"categories": ["cat", "dog"]},
+            transforms=lambda: preprocess,
+        )
+    )
+    models = types.SimpleNamespace(
+        mobilenet_v2=lambda weights=None: DummyModel(),
+        MobileNet_V2_Weights=dummy_weights,
+    )
+    class DummyTensor(list):
+        def argmax(self):
+            return 1
+
+    torch_mod = types.SimpleNamespace(
+        no_grad=lambda: contextlib.nullcontext(),
+        nn=types.SimpleNamespace(functional=types.SimpleNamespace(softmax=lambda x, dim=0: DummyTensor([0.2, 0.8]))),
+    )
+    torchvision_mod = types.SimpleNamespace(models=models)
+    monkeypatch.setitem(sys.modules, "torch", torch_mod)
+    monkeypatch.setitem(sys.modules, "torchvision", torchvision_mod)
+    monkeypatch.setitem(sys.modules, "torchvision.models", models)
+    monkeypatch.setattr("PIL.Image.open", lambda p: "img")
+
+    result = await tm.image_classify("img.png")
+    assert result["label"] == "dog"
+
+
+@pytest.mark.asyncio
+async def test_audio_transcribe_whisper(monkeypatch):
+    tm = ToolManager(db_path=":memory:")
+
+    import types
+    import sys
+
+    class DummyModel:
+        def transcribe(self, path):
+            return ([types.SimpleNamespace(text="hello ")], None)
+
+    fw_mod = types.SimpleNamespace(WhisperModel=lambda *a, **kw: DummyModel())
+    monkeypatch.setitem(sys.modules, "faster_whisper", fw_mod)
+
+    result = await tm.audio_transcribe("a.wav")
+    assert result["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_audio_transcribe_fallback(monkeypatch):
+    tm = ToolManager(db_path=":memory:")
+
+    import builtins
+    import types
+    import sys
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "faster_whisper":
+            raise ModuleNotFoundError
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    class DummyAudioFile:
+        def __init__(self, path):
+            self.path = path
+
+        def __enter__(self):
+            return "src"
+
+        def __exit__(self, exc_type, exc, tb):
+            pass
+
+    class DummyRecognizer:
+        def record(self, source):
+            return b"aud"
+
+        def recognize_sphinx(self, audio):
+            return "hi"
+
+    sr_mod = types.SimpleNamespace(AudioFile=DummyAudioFile, Recognizer=DummyRecognizer)
+    monkeypatch.setitem(sys.modules, "speech_recognition", sr_mod)
+
+    result = await tm.audio_transcribe("a.wav")
+    assert result["text"] == "hi"
+
