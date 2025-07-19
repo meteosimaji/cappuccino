@@ -30,6 +30,10 @@ from . import thread_store
 
 from .poker import PokerMatch, PokerView
 
+# Initialize logging before any functions use it
+setup_logging("bot.log")
+logger = logging.getLogger(__name__)
+
 
 # ───────────────── TOKEN / KEY ─────────────────
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -161,9 +165,9 @@ async def call_openai_api(
     model  : GPTモデル名
     戻り値 : (テキスト, discord.File リスト)
     """
-    print(">>> call_openai_api called")
-    print("  prompt:", prompt)
-    print("  files :", files)
+    logger.debug("call_openai_api called")
+    logger.debug("prompt: %s", prompt)
+    logger.debug("files: %s", files)
     blocks = [{"type": "input_text", "text": prompt}]
     file_objs: list[discord.File] = []
 
@@ -235,13 +239,10 @@ async def call_openai_api(
 
     result_text = "\n\n".join(text_chunks) or "(No text)"
 
-    print("<<< call_openai_api returning")
+    logger.debug("call_openai_api returning")
     return result_text, file_objs
-# ───────────────── Voice Transcription / TTS ─────────────────
 
-# ───────────────── Logger ─────────────────
-setup_logging("bot.log")
-logger = logging.getLogger(__name__)
+# ───────────────── Voice Transcription / TTS ─────────────────
 
 # チャンネル型の許可タプル (Text / Thread / Stage)
 MESSAGE_CHANNEL_TYPES: tuple[type, ...] = (
