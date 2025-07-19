@@ -23,5 +23,6 @@ networkx
 aio_pika
 textblob
 httpx<0.28
+playwright
 uvicorn
 httpx<0.28

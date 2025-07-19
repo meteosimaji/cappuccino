@@ -130,20 +130,8 @@ async def test_info_search(tm, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_browser_and_service_placeholders(tm):
+async def test_service_placeholders(tm):
     funcs = [
-        tm.browser_navigate,
-        tm.browser_view,
-        tm.browser_click,
-        tm.browser_input,
-        tm.browser_move_mouse,
-        tm.browser_press_key,
-        tm.browser_select_option,
-        tm.browser_save_image,
-        tm.browser_scroll_up,
-        tm.browser_scroll_down,
-        tm.browser_console_exec,
-        tm.browser_console_view,
         tm.service_expose_port,
         tm.service_deploy_frontend,
         tm.service_deploy_backend,
@@ -153,8 +141,7 @@ async def test_browser_and_service_placeholders(tm):
         if arg_count == 0:
             result = await func()
         elif arg_count == 1:
-            arg = 1 if 'service_expose_port' in func.__name__ else "x"
-            result = await func(arg)
+            result = await func("x")
         else:
             result = await func("x", "y")
         assert "error" in result
