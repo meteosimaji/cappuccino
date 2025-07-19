@@ -1580,23 +1580,25 @@ async def cmd_gpt(msg: discord.Message, user_text: str):
     if history_txt:
         prompt = (
         "###system\n"
-        "You are a local AI assistant Cappuccino, created by Meteo (SIMAJILORD) for the CappuccinoAI platform, specialized in complex, cross-domain problem solving, creative and technical reasoning. "
+        "You are a local AI assistant Cappuccino, created by Meteo for the CappuccinoAI platform, specialized in complex, cross-domain problem solving, creative and technical reasoning. "
         "You support advanced information search, image generation, and code execution. "
         "You feature a context window exceeding 1 million tokens, outputting up to 32,768 tokens per response, and your knowledge is current as of June 1, 2024. "
         "Read the conversation history carefully, but only respond directly to the latest user message. Avoid repeating previously provided information unless explicitly requested.\n"
-        "###会話履歴\n"
-        f"{history_txt}\n"
-        "###今回のメッセージ\n"
+        "Reply in Japanese with a casual, friendly tone (タメ口寄り), keeping sentences short and avoiding overly formal expressions.\n\n"
+        "###Conversation history\n"
+        f"{history_txt}\n\n"
+        "###Current message\n\n"
         f"{user_text}"
     )
     else:
         prompt = (
         "###system\n"
-        "You are a local AI assistant Cappuccino, created by Meteo (SIMAJILORD) for the CappuccinoAI platform, specialized in complex, cross-domain problem solving, creative and technical reasoning. "
+        "You are a local AI assistant Cappuccino, created by Meteo for the CappuccinoAI platform, specialized in complex, cross-domain problem solving, creative and technical reasoning. "
         "You support advanced information search, image generation, and code execution. "
         "You feature a context window exceeding 1 million tokens, outputting up to 32,768 tokens per response, and your knowledge is current as of June 1, 2024. "
         "Respond directly to the user's message.\n"
-        "###今回のメッセージ\n"
+        "Reply in Japanese with a casual, friendly tone (タメ口寄り), keeping sentences short and avoiding overly formal expressions.\n\n"
+        "###Current message\n"
         f"{user_text}"
     )
     reply = await msg.reply("…")
@@ -1863,126 +1865,106 @@ async def cmd_forward(msg: discord.Message, arg: str):
 
 
 async def cmd_purge(msg: discord.Message, arg: str):
-    """指定数またはリンク以降のメッセージを一括削除"""
+    """
+    一括削除
+    ─────────────────────────
+    • y!purge <数>                       … 直近 <数> 件を削除（上限 1000）
+    • y!purge <リンク>                   … 指定メッセージ“より後”を全削除
+    • y!purge <リンク1> <リンク2?>       … 2 リンク間を全削除（両端も削除）
+    ─────────────────────────
+    """
     if not msg.guild:
-        await msg.reply("サーバー内でのみ使用できます。")
-        return
+        return await msg.reply("サーバー内でのみ使用できます。")
 
-    target_channel: discord.abc.GuildChannel = msg.channel
-    target_message: discord.Message | None = None
-    arg = arg.strip()
-    if not arg:
-        await msg.reply("`y!purge <数>` または `y!purge <メッセージリンク>` の形式で指定してね！")
-        return
+    tokens = arg.strip().split()
+    if not tokens:
+        return await msg.reply("`y!purge <数|リンク>` の形式で指定してね！")
 
-    if arg.isdigit():
-        limit = min(int(arg), 1000)
-    else:
-        ids = parse_message_link(arg)
-        if not ids:
-            await msg.reply("形式が正しくないよ！")
-            return
-        gid, cid, mid = ids
-        if gid != msg.guild.id:
-            await msg.reply("このサーバーのメッセージリンクを指定してね！")
-            return
-        ch = msg.guild.get_channel(cid)
-        if ch is None or not isinstance(ch, MESSAGE_CHANNEL_TYPES):
-            await msg.reply(
-                f"リンク先チャンネルが見つかりません (取得型: {type(ch).__name__ if ch else 'None'})。"
-            )
-            return
-        target_channel = ch
-        if isinstance(ch, (discord.TextChannel, discord.Thread)):
-            try:
-                target_message = await ch.fetch_message(mid)
-            except discord.NotFound:
-                await msg.reply("指定メッセージが存在しません。")
-                return
-        else:
-            try:
-                target_message = await ch.fetch_message(mid)
-            except Exception:
-                await msg.reply("このチャンネル型では purge が未対応です。")
-                return
-        limit = None
+    # ---------- 数を指定 ----------
+    if tokens[0].isdigit():
+        limit = min(int(tokens[0]), 1000)
+        return await _purge_count(msg, limit)
+
+    # ---------- 1‑リンク or 2‑リンク ----------
+    links = tokens[:2]  # 2 個まで拾う
+    ids = [parse_message_link(t) for t in links]
+    if None in ids:
+        return await msg.reply("リンクの形式が正しくないよ！")
+
+    # ギルド・チャンネル整合性チェック
+    (gid1, cid1, mid1), *rest = ids
+    if gid1 != msg.guild.id:
+        return await msg.reply("このサーバーのメッセージリンクを指定してね！")
+    if rest:
+        gid2, cid2, mid2 = rest[0]
+        if gid2 != gid1 or cid2 != cid1:
+            return await msg.reply("2 つのリンクは同じチャンネルのものを指定してね！")
+
+    ch: discord.TextChannel | discord.Thread | None = msg.guild.get_channel(cid1)
+    if ch is None or not isinstance(ch, MESSAGE_CHANNEL_TYPES):
+        return await msg.reply("リンク先チャンネルが見つかりません。")
 
     # 権限チェック
-    perms_user = target_channel.permissions_for(msg.author)
-    perms_bot = target_channel.permissions_for(msg.guild.me)
+    perms_user = ch.permissions_for(msg.author)
+    perms_bot  = ch.permissions_for(msg.guild.me)
     if not (perms_user.manage_messages and perms_bot.manage_messages):
-        await msg.reply("管理メッセージ権限が足りません。", delete_after=5)
-        return
+        return await msg.reply("管理メッセージ権限が足りません。", delete_after=5)
 
-    deleted_total = 0
+    # ------------------ メッセージ取得 ------------------
+    async def _get_message(channel, mid) -> discord.Message | None:
+        try:
+            return await channel.fetch_message(mid)
+        except discord.NotFound:
+            return None
 
-    def _skip_cmd(m: discord.Message) -> bool:
-        if m.id == msg.id:
-            return False
-        if (
-            m.type
-            in (
-                discord.MessageType.chat_input_command,
-                discord.MessageType.context_menu_command,
-            )
-            and m.interaction
-            and m.interaction.id == msg.id
-        ):
-            return False
-        return True
+    anchor1 = await _get_message(ch, mid1)
+    if anchor1 is None:
+        return await msg.reply("最初のメッセージが見つかりません。")
 
-    try:
-        if target_message is None:
-            if hasattr(target_channel, "purge"):
-                try:
-                    deleted = await target_channel.purge(limit=limit, check=_skip_cmd)
-                except discord.NotFound:
-                    deleted = []
-                deleted_total = len(deleted)
-            else:
-                msgs = [
-                    m
-                    async for m in target_channel.history(limit=limit)
-                    if _skip_cmd(m)
-                ]
-                try:
-                    await target_channel.delete_messages(msgs)
-                except discord.NotFound:
-                    pass
-                deleted_total = len(msgs)
-        else:
-            after = target_message
-            while True:
-                if hasattr(target_channel, "purge"):
-                    try:
-                        batch = await target_channel.purge(after=after, limit=100, check=_skip_cmd)
-                    except discord.NotFound:
-                        batch = []
-                else:
-                    batch = [
-                        m
-                        async for m in target_channel.history(after=after, limit=100)
-                        if _skip_cmd(m)
-                    ]
-                    try:
-                        await target_channel.delete_messages(batch)
-                    except discord.NotFound:
-                        pass
-                if not batch:
-                    break
-                deleted_total += len(batch)
-                after = batch[-1]
-            try:
-                await target_message.delete()
-                deleted_total += 1
-            except (discord.HTTPException, discord.NotFound):
-                pass
-    except discord.Forbidden:
-        await msg.reply("権限不足で削除できませんでした。", delete_after=5)
-        return
+    # ------- 1 リンク（anchor1 より後を削除） -------
+    if len(ids) == 1:
+        deleted = await ch.purge(after=anchor1, check=lambda m: m.id != msg.id)
+        # anchor1 自身も削除
+        try:
+            await anchor1.delete()
+            deleted.append(anchor1)
+        except discord.NotFound:
+            pass
+        return await msg.channel.send(f"🧹 {len(deleted)}件削除しました！", delete_after=5)
 
-    await msg.channel.send(f"🧹 {deleted_total}件削除しました！", delete_after=5)
+    # ------- 2 リンク（anchor1 と anchor2 の間を削除） -------
+    anchor2 = await _get_message(ch, mid2)
+    if anchor2 is None:
+        return await msg.reply("2 つ目のメッセージが見つかりません。")
 
+    # older, newer の順に並べ替え
+    older, newer = (anchor1, anchor2) if anchor1.created_at < anchor2.created_at else (anchor2, anchor1)
+
+    # purge(before=, after=) で間を一気に
+    deleted = await ch.purge(after=older, before=newer, check=lambda m: True)
+
+    # 両端も削除
+    for m in (older, newer):
+        try:
+            await m.delete()
+            deleted.append(m)
+        except discord.NotFound:
+            pass
+
+    await msg.channel.send(f"🧹 {len(deleted)}件削除しました！", delete_after=5)
+
+
+# ------------------------------------------------------------------
+# 旧ロジック（件数指定）は関数に切り出して流用
+async def _purge_count(msg: discord.Message, limit: int):
+    ch   = msg.channel
+    perms_user = ch.permissions_for(msg.author)
+    perms_bot  = ch.permissions_for(msg.guild.me)
+    if not (perms_user.manage_messages and perms_bot.manage_messages):
+        return await msg.reply("管理メッセージ権限が足りません。", delete_after=5)
+
+    deleted = await ch.purge(limit=limit, check=lambda m: m.id != msg.id)
+    await msg.channel.send(f"🧹 {len(deleted)}件削除しました！", delete_after=5)
 
 async def cmd_qr(msg: discord.Message, text: str) -> None:
     """指定テキストのQRコードを生成"""
@@ -2051,12 +2033,15 @@ async def cmd_barcode(msg: discord.Message, text: str) -> None:
 import os
 import shutil
 import tempfile
+import asyncio
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
 from typing import Optional, Tuple
+
+import discord  # 追加：DiscordのView/ボタン用
 
 # 新OpenAI API (v1.x)
 from openai import AsyncOpenAI
@@ -2073,8 +2058,10 @@ GPT_SYSTEM = (
 
 DISCORD_TEXT_LIMIT = 2000
 
+
 def trim_text(s: str, limit: int = DISCORD_TEXT_LIMIT):
-    return s[:limit-10] + "\n...(省略)" if len(s) > limit else s
+    return s[:limit - 10] + "\n...(省略)" if len(s) > limit else s
+
 
 async def autofix_latex(expr: str, log: str) -> Optional[str]:
     """GPT-4.1でLaTeX修正版を自動生成"""
@@ -2100,6 +2087,17 @@ async def autofix_latex(expr: str, log: str) -> Optional[str]:
     except Exception as e:
         print(f"GPT自動修正失敗: {e}")
         return None
+
+
+def make_white_bg(png_path: str) -> str:
+    """透過PNGから白背景PNGを生成"""
+    img = Image.open(png_path).convert("RGBA")
+    white = Image.new("RGBA", img.size, (255, 255, 255, 255))
+    white.paste(img, mask=img.split()[3])
+    out_path = png_path[:-4] + "_white.png"
+    white.save(out_path)
+    return out_path
+
 
 async def render_latex_image(tex: str) -> Tuple[Optional[str], Optional[str]]:
     dpi, pad, scale = 300, 0.3, 1.3
@@ -2147,7 +2145,6 @@ async def render_latex_image(tex: str) -> Tuple[Optional[str], Optional[str]]:
             y0, y1 = ys.min(), ys.max()
             x0, x1 = xs.min(), xs.max()
             margin = 8
-            # 負座標にならないよう修正
             img = img.crop((
                 max(x0 - margin, 0),
                 max(y0 - margin, 0),
@@ -2159,8 +2156,56 @@ async def render_latex_image(tex: str) -> Tuple[Optional[str], Optional[str]]:
         return None, f"画像クロップ失敗: {e}"
     return png_path, None
 
-def trim_text(text: str, maxlen: int = 1800):
-    return (text[:maxlen] + "\n...省略") if len(text) > maxlen else text
+
+class TexToggleView(discord.ui.View):
+    """透過PNG ↔ 白背景PNG 切替ボタン"""
+    def __init__(self, transparent_path: str, white_path: str, *, author_id: int, delete_after: int = 600, timeout: float = 180):
+        super().__init__(timeout=timeout)
+        self.transparent_path = transparent_path
+        self.white_path = white_path
+        self.showing_transparent = True
+        self.author_id = author_id
+        self.delete_after = delete_after  # ファイル削除猶予
+        self.message: Optional[discord.Message] = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("投稿者だけが切り替えできるよ。", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="白背景にする", style=discord.ButtonStyle.secondary, custom_id="tex_toggle_bg")
+    async def toggle_bg(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.showing_transparent = not self.showing_transparent
+        if self.showing_transparent:
+            file = discord.File(self.transparent_path, filename="formula.png")
+            button.label = "白背景にする"
+        else:
+            file = discord.File(self.white_path, filename="formula_white.png")
+            button.label = "透過に戻す"
+
+        await interaction.response.edit_message(attachments=[file], view=self)
+
+    async def on_timeout(self):
+        # ボタン無効化
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+        # 少し待ってからファイル削除
+        async def _cleanup():
+            await asyncio.sleep(self.delete_after)
+            for p in (self.transparent_path, self.white_path):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+        asyncio.create_task(_cleanup())
+
 
 async def cmd_tex(msg, formula: str):
     formula = formula.strip()
@@ -2170,10 +2215,11 @@ async def cmd_tex(msg, formula: str):
     if not (shutil.which("latex") and shutil.which("dvipng")):
         await msg.reply("❌ LaTeX (latex / dvipng) が見つからないよ。サーバー管理者に連絡してね。")
         return
+
     plt.rcParams.update({
-    "text.usetex": True,
-    "font.family": "serif",
-    "text.latex.preamble": r"""
+        "text.usetex": True,
+        "font.family": "serif",
+        "text.latex.preamble": r"""
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
@@ -2183,7 +2229,8 @@ async def cmd_tex(msg, formula: str):
 \usepackage{siunitx}
 \usepackage{physics}
 """,
-})
+    })
+
     tex_src = formula if r"\begin{align" in formula else rf"\[{formula}\]"
     png_path, err = await render_latex_image(tex_src)
     if err:
@@ -2193,17 +2240,28 @@ async def cmd_tex(msg, formula: str):
             tex_fixed = rf"\[{fixed}\]"
             png_path, err = await render_latex_image(tex_fixed)
             if png_path:
-                await msg.reply(f"✅ 自動修正が成功しました！\n修正後: `{fixed}`", file=discord.File(png_path))
-                os.remove(png_path)
+                # 自動修正成功時もボタン付ける（元コードでは即削除だったが拡張）
+                white_path = make_white_bg(png_path)
+                view = TexToggleView(png_path, white_path, author_id=msg.author.id)
+                sent = await msg.reply(
+                    f"✅ 自動修正が成功しました！\n修正後: `{fixed}`",
+                    file=discord.File(png_path, filename="formula.png"),
+                    view=view
+                )
+                view.message = sent
                 return
-        # ここでエラー送信（trim_textはグローバルでOK）
         await msg.reply(f"❌ LaTeXエラー（自動修正も失敗）:\n```\n{trim_text(err)}\n```")
         return
-    await msg.reply("🖼️ 数式レンダリング結果はこちら！", file=discord.File(png_path))
-    try:
-        os.remove(png_path)
-    except Exception:
-        pass
+
+    # 正常レンダリング時
+    white_path = make_white_bg(png_path)
+    view = TexToggleView(png_path, white_path, author_id=msg.author.id)
+    sent = await msg.reply(
+        "🖼️ 数式レンダリング結果",
+        file=discord.File(png_path, filename="formula.png"),
+        view=view
+    )
+    view.message = sent
 # ──────────── 🎵  自動切断ハンドラ ────────────
 
 @client.event
@@ -2361,64 +2419,45 @@ async def cmd_weather(msg: discord.Message, arg: str) -> None:
         await msg.channel.send(f"テスト送信に失敗: {e}")
 
 
-# ───────────────── ニュース自動送信 ─────────────────
-NEWS_FEED_URL = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja"
-NEWS_FILE = os.path.join(ROOT_DIR, "sent_news.json")
+# ───────────────── ニュース自動送信（要約なし・APIゼロ版） ─────────────────
+import os, json, datetime, asyncio, logging, re, aiohttp, feedparser
+from urllib.parse import urlparse, urlunparse, parse_qs
+from bs4 import BeautifulSoup
+import discord
+
+# --------------- 設定 ---------------
+NEWS_FEED_URL   = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja"
+NEWS_FILE       = os.path.join(ROOT_DIR, "sent_news.json")
 DAILY_NEWS_FILE = os.path.join(ROOT_DIR, "daily_news.json")
+MAX_DESC_LEN    = 500         # Embed の説明欄に入れる上限（好みで変更）
+MAX_DIGEST_LEN  = 1500        # 日次まとめ Embed の説明欄上限
 
-def _load_sent_news() -> dict:
+logger = logging.getLogger(__name__)
+
+# --------------- JSON ユーティリティ ---------------
+def _load_json(path: str) -> dict:
     try:
-        with open(NEWS_FILE, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, dict):
-                return data
+            return data if isinstance(data, dict) else {}
     except Exception:
-        pass
-    return {}
+        return {}
 
-def _save_sent_news(data: dict) -> None:
+def _save_json(path: str, data: dict) -> None:
     try:
-        with open(NEWS_FILE + ".tmp", "w", encoding="utf-8") as f:
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(NEWS_FILE + ".tmp", NEWS_FILE)
+        os.replace(tmp, path)
     except Exception as e:
-        logger.error("failed to save news file: %s", e)
+        logger.error("failed to save %s: %s", path, e)
 
-sent_news = _load_sent_news()
+sent_news  = _load_json(NEWS_FILE)
+daily_news = _load_json(DAILY_NEWS_FILE)
 
-def _load_daily_news() -> dict:
-    try:
-        with open(DAILY_NEWS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception:
-        pass
-    return {}
-
-def _save_daily_news(data: dict) -> None:
-    try:
-        with open(DAILY_NEWS_FILE + ".tmp", "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(DAILY_NEWS_FILE + ".tmp", DAILY_NEWS_FILE)
-    except Exception as e:
-        logger.error("failed to save daily news file: %s", e)
-
-daily_news = _load_daily_news()
-
-async def _summarize(text: str) -> str:
-    prompt = (
-        "Summarize the text below in Japanese, using about two concise sentences. "
-        "Unless otherwise instructed, reply in Japanese.\n" + text
-    )
-    try:
-        return await cappuccino_agent.call_llm(prompt)
-    except Exception as e:
-        logger.error("summary failed: %s", e)
-        return text[:200]
-
+# --------------- URL ユーティリティ ---------------
 def _shorten_url(url: str) -> str:
-    """Remove query and fragment from URL for display"""
+    """クエリとフラグメントを取り除いて短く表示"""
     try:
         p = urlparse(url)
         return urlunparse(p._replace(query="", fragment=""))
@@ -2426,7 +2465,7 @@ def _shorten_url(url: str) -> str:
         return url
 
 def _resolve_google_news_url(url: str) -> str:
-    """Return original article URL from Google News redirect"""
+    """Google News のリダイレクト URL → 元記事 URL"""
     try:
         p = urlparse(url)
         if "news.google.com" in p.netloc:
@@ -2437,121 +2476,121 @@ def _resolve_google_news_url(url: str) -> str:
         pass
     return url
 
+# --------------- サムネイル取得 ---------------
+aiohttp_session: aiohttp.ClientSession | None = None  # 使い回し
+
+async def _get_session() -> aiohttp.ClientSession:
+    global aiohttp_session
+    if aiohttp_session is None or aiohttp_session.closed:
+        aiohttp_session = aiohttp.ClientSession()
+    return aiohttp_session
+
 async def _fetch_thumbnail(url: str) -> str | None:
-    """Fetch og:image from article page"""
+    """記事から og:image を抜く"""
     try:
         url = _resolve_google_news_url(url)
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, timeout=10) as resp:
-                html = await resp.text()
-        m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](.*?)["\']', html, re.IGNORECASE)
-        if not m:
-            m = re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+property=["\']og:image["\']', html, re.IGNORECASE)
+        sess = await _get_session()
+        async with sess.get(url, timeout=10) as resp:
+            html = await resp.text()
+        m = re.search(
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](.*?)["\']',
+            html, re.IGNORECASE
+        ) or re.search(
+            r'<meta[^>]+content=["\'](.*?)["\'][^>]+property=["\']og:image["\']',
+            html, re.IGNORECASE
+        )
         return m.group(1) if m else None
     except Exception as e:
-        logger.error("thumb fetch failed for %s: %s", url, e)
+        logger.debug("thumb fetch failed for %s: %s", url, e)
         return None
 
-async def _fetch_article_text(url: str) -> str | None:
-    """Fetch article body text"""
-    try:
-        url = _resolve_google_news_url(url)
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, timeout=10) as resp:
-                html = await resp.text()
-        soup = BeautifulSoup(html, "html.parser")
-        article = soup.find("article")
-        if article:
-            text = article.get_text(separator=" ", strip=True)
-        else:
-            text = " ".join(p.get_text(strip=True) for p in soup.find_all("p"))
-        return text[:5000]
-    except Exception as e:
-        logger.error("article fetch failed for %s: %s", url, e)
-        return None
-
+# --------------- ニュース送信 ---------------
 async def send_latest_news(channel: discord.TextChannel):
-    feed = feedparser.parse(NEWS_FEED_URL)
-    today = datetime.date.today().isoformat()
-    sent_urls: list[str] = sent_news.get(today, [])
-    new_entries = []
-    for ent in feed.entries:
-        url = ent.link
-        if url in sent_urls:
-            continue
-        new_entries.append(ent)
-        sent_urls.append(url)
-        if len(new_entries) >= 7:
-            break
+    feed   = feedparser.parse(NEWS_FEED_URL)
+    today  = datetime.date.today().isoformat()
+    sent   = sent_news.get(today, [])
+
+    # 新規エントリを最大 7 件
+    new_entries = [e for e in feed.entries if e.link not in sent][:7]
     if not new_entries:
         return
-    sent_news[today] = sent_urls
-    _save_sent_news(sent_news)
+
+    # 送信済み URL を更新・保存
+    sent.extend(e.link for e in new_entries)
+    sent_news[today] = sent
+    _save_json(NEWS_FILE, sent_news)
+
+    # 1 件ずつ Discord に Embed 送信
     for ent in new_entries:
+        raw_desc = re.sub(r"<.*?>", "", ent.get("summary", ""))
+        summary  = (raw_desc[:MAX_DESC_LEN] + "…") if len(raw_desc) > MAX_DESC_LEN else raw_desc
+
+        # 日次まとめ用に保存
+        daily_list = daily_news.get(today, [])
+        daily_list.append(f"{ent.title}。{summary}")
+        daily_news[today] = daily_list
+
         article_url = _resolve_google_news_url(ent.link)
-        text = await _fetch_article_text(article_url)
-        if not text:
-            text = re.sub(r"<.*?>", "", ent.get("summary", ""))
-        summary = await _summarize(text)
-        day_list = daily_news.get(today, [])
-        day_list.append(f"{ent.title}。{summary}")
-        daily_news[today] = day_list
-        article_url = _resolve_google_news_url(ent.link)
-        emb = discord.Embed(
-            title=ent.title,
-            url=_shorten_url(article_url),
-            description=summary,
-            colour=0x3498db,
+        embed = discord.Embed(
+            title       = ent.title,
+            url         = _shorten_url(article_url),
+            description = summary,
+            colour      = 0x3498DB,
         )
         if getattr(ent, "source", None) and getattr(ent.source, "title", None):
-            emb.set_footer(text=ent.source.title)
+            embed.set_footer(text=ent.source.title)
+
         thumb = await _fetch_thumbnail(article_url)
         if thumb:
-            emb.set_thumbnail(url=thumb)
-        await channel.send(embed=emb)
-    _save_daily_news(daily_news)
+            embed.set_thumbnail(url=thumb)
 
+        await channel.send(embed=embed)
+
+    # 日次 JSON 保存
+    _save_json(DAILY_NEWS_FILE, daily_news)
+
+# --------------- 前日のまとめ ---------------
 async def send_daily_digest(channel: discord.TextChannel):
-    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
-    items = daily_news.get(yesterday)
+    yesterday  = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    items      = daily_news.pop(yesterday, None)
     if not items:
         return
-    text = "\n".join(items)
-    summary = await _summarize(text)
-    emb = discord.Embed(
-        title=f"{yesterday} のニュースまとめ",
-        description=summary,
-        colour=0x95a5a6,
-    )
-    await channel.send(embed=emb)
-    del daily_news[yesterday]
-    _save_daily_news(daily_news)
 
+    digest = "\n".join(items)
+    digest = (digest[:MAX_DIGEST_LEN] + "…") if len(digest) > MAX_DIGEST_LEN else digest
+
+    embed = discord.Embed(
+        title       = f"{yesterday} のニュースまとめ",
+        description = digest,
+        colour      = 0x95A5A6,
+    )
+    await channel.send(embed=embed)
+
+    _save_json(DAILY_NEWS_FILE, daily_news)
+
+# --------------- メインループ ---------------
 news_task: asyncio.Task | None = None
 
 async def hourly_news() -> None:
     await client.wait_until_ready()
     while True:
-        now = datetime.datetime.now()
-        next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        now        = datetime.datetime.now()
+        next_hour  = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
         await asyncio.sleep((next_hour - now).total_seconds())
+
         if not NEWS_CHANNEL_ID:
             continue
-        channel = client.get_channel(NEWS_CHANNEL_ID)
-        if channel is None:
-            try:
-                channel = await client.fetch_channel(NEWS_CHANNEL_ID)
-            except Exception as e:
-                logger.error("failed to fetch news channel: %s", e)
-                continue
-        if isinstance(channel, MESSAGE_CHANNEL_TYPES):
-            try:
-                await send_latest_news(channel)
-                current_hour = datetime.datetime.now().hour
-                if current_hour == 0:
-                    await send_daily_digest(channel)
-            except Exception as e:
-                logger.error("failed to send news: %s", e)
+
+        channel = client.get_channel(NEWS_CHANNEL_ID) or await client.fetch_channel(NEWS_CHANNEL_ID)
+        if not isinstance(channel, MESSAGE_CHANNEL_TYPES):
+            continue
+
+        try:
+            await send_latest_news(channel)
+            if datetime.datetime.now().hour == 0:  # 0 時に前日のまとめ
+                await send_daily_digest(channel)
+        except Exception as e:
+            logger.error("failed to send news: %s", e)
 
 eew_task: asyncio.Task | None = None
 EEW_LIST_URL = "https://www.jma.go.jp/bosai/quake/data/list.json"
