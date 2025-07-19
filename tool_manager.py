@@ -259,6 +259,20 @@ class ToolManager:
         await conn.commit()
         return {"task_id": task_id, "schedule": schedule}
 
+    @log_tool
+    async def agent_list_tasks(self) -> Dict[str, Any]:
+        """Return all tasks with phase, status and schedule."""
+        conn = await self._get_db_connection()
+        async with conn.execute(
+            "SELECT id, phase, status, schedule FROM tasks"
+        ) as cur:
+            rows = await cur.fetchall()
+        tasks = [
+            {"id": row[0], "phase": row[1], "status": row[2], "schedule": row[3]}
+            for row in rows
+        ]
+        return {"tasks": tasks}
+
     # ------------------------------------------------------------------
     # Messaging
     # ------------------------------------------------------------------

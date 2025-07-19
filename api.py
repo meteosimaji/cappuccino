@@ -128,6 +128,26 @@ async def advance_plan(update: StepUpdate) -> Dict[str, Any]:
     return await state_manager.load_long_term_plan()
 
 
+class ScheduleInfo(BaseModel):
+    schedule: str
+
+
+@app.get("/agent/tasks")
+async def list_tasks() -> Dict[str, Any]:
+    """Return all tasks with phase and status."""
+    return await tool_manager.agent_list_tasks()
+
+
+@app.post("/agent/tasks/{task_id}/advance")
+async def advance_task(task_id: str) -> Dict[str, Any]:
+    return await tool_manager.agent_advance_phase(task_id)
+
+
+@app.post("/agent/tasks/{task_id}/schedule")
+async def schedule_task(task_id: str, info: ScheduleInfo) -> Dict[str, Any]:
+    return await tool_manager.agent_schedule_task(task_id, info.schedule)
+
+
 @app.post("/agent/tool_call_result")
 async def agent_tool_call_result(result: ToolCallResult) -> Dict[str, Any]:
     return await agent.handle_tool_call_result(result.data)
