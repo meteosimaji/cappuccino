@@ -431,17 +431,24 @@ class ToolManager:
     async def media_generate_speech(self, text: str, output_path: str) -> Dict[str, Any]:
         """Generate speech audio from text and save as an MP3 file."""
         try:
+            output_path = self._validate_path(output_path)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        try:
             from gtts import gTTS  # type: ignore
+        except Exception as e:  # pragma: no cover - import error branch
+            return {"error": str(e)}
 
-            def _generate() -> None:
-                tts = gTTS(text)
-                tts.save(output_path)
+        def _generate() -> None:
+            tts = gTTS(text)
+            tts.save(output_path)
 
+        try:
             await asyncio.to_thread(_generate)
-            # Placeholder implementation still returns an error for now
-            return {"error": "speech generation not implemented"}
-        except Exception:
-            return {"error": "speech generation not implemented"}
+            return {"path": output_path}
+        except Exception as e:
+            return {"error": str(e)}
 
 
 

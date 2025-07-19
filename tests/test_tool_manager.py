@@ -49,7 +49,8 @@ async def test_media_generate_speech(tmp_path, monkeypatch):
 
     monkeypatch.setattr("gtts.gTTS", DummyTTS)
     result = await tm.media_generate_speech("hello", str(out_file))
-    assert "error" in result
+    assert result == {"path": str(out_file)}
+    assert out_file.exists()
 
 
 @pytest.mark.asyncio
