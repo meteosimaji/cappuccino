@@ -25,7 +25,7 @@ import aiohttp
 import feedparser
 import json
 from cappuccino_agent import CappuccinoAgent
-from openai import AsyncOpenAI
+from ollama_client import OllamaLLM
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
@@ -58,7 +58,7 @@ load_dotenv(os.path.join(ROOT_DIR, ".env"))
 
 # Load credentials from environment variables
 TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
 
 NEWS_CONF_FILE = os.path.join(ROOT_DIR, "news_channel.json")
@@ -139,11 +139,11 @@ EEW_CHANNEL_ID = _load_eew_channel()
 LAST_EEW_ID = _load_last_eew()
 WEATHER_CHANNEL_ID = _load_weather_channel()
 
-# Initialize CappuccinoAgent for GPT interactions
-cappuccino_agent = CappuccinoAgent(api_key=OPENAI_API_KEY)
+# Initialize CappuccinoAgent for LLM interactions
+cappuccino_agent = CappuccinoAgent(model=OLLAMA_MODEL)
 
-# Direct OpenAI client for bot commands
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+# Local LLM client for bot commands
+openai_client = OllamaLLM(OLLAMA_MODEL)
 
 def _guess_mime(fname: str) -> str:
     mime, _ = mimetypes.guess_type(fname)
@@ -159,91 +159,12 @@ async def call_openai_api(
     ctx: Optional[Union[discord.Message, "commands.Context"]] = None,
     *,
     files: Optional[Iterable[Union[str, discord.Attachment]]] = None,
-    model: str = "gpt-4.1",
+    model: str = "",
 ) -> tuple[str, list[discord.File]]:
-    """
-    prompt : 入力プロンプト
-    ctx    : DiscordのMessageまたはContext（返信用。必須ではない）
-    files  : msg.attachments など、必ず呼び出し元で指定！
-    model  : GPTモデル名
-    戻り値 : (テキスト, discord.File リスト)
-    """
+    """Call the local LLM and return the text response."""
     logger.debug("call_openai_api called")
-    logger.debug("prompt: %s", prompt)
-    logger.debug("files: %s", files)
-    blocks = [{"type": "input_text", "text": prompt}]
-    file_objs: list[discord.File] = []
-
-    if files:
-        for src in files:
-            # Discord Attachment の場合は URL を直接渡す
-            if isinstance(src, discord.Attachment):
-                url = src.url
-                mime = src.content_type or _guess_mime(src.filename or "")
-                if mime.startswith("image/"):
-                    blocks.append({"type": "input_image", "image_url": url, "detail": "high"})
-                elif mime == "application/pdf":
-                    blocks.append({
-                        "type": "input_file",
-                        "file_url": url
-                    })
-            # 文字列で URL が渡された場合
-            elif isinstance(src, str) and src.startswith("http"):
-                ext = os.path.splitext(src)[1].lower()
-                if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
-                    blocks.append({
-                        "type": "input_image",
-                        "image_url": {"url": src, "detail": "high"}
-                    })
-                else:
-                    blocks.append({
-                        "type": "input_file",
-                        "file_url": src
-                    })
-
-    resp = await openai_client.responses.create(
-        model=model,
-        tools=[
-            {"type": "web_search_preview"},
-            {"type": "code_interpreter", "container": {"type": "auto"}},
-            {"type": "image_generation"},
-        ],
-        input=[{"role": "user", "content": blocks}],
-    )
-
-    text_chunks: list[str] = []
-
-    async def _fetch_container(cid: str, fid: str) -> bytes:
-        if hasattr(openai_client, "container_files"):
-            try:
-                b = await openai_client.container_files.retrieve_content(cid, fid)
-                return b.encode() if isinstance(b, str) else b
-            except Exception:
-                pass
-        url = f"https://api.openai.com/v1/containers/{cid}/files/{fid}/content"
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=headers) as r:
-                r.raise_for_status()
-                return await r.read()
-
-    for item in resp.output:
-        if item.type == "message":
-            for blk in item.content:
-                if blk.type == "output_text" and blk.text:
-                    text_chunks.append(blk.text.strip())
-                for ann in getattr(blk, "annotations", []):
-                    if ann.type == "container_file_citation":
-                        data = await _fetch_container(ann.container_id, ann.file_id)
-                        file_objs.append(await _save_tmp(data, ann.filename))
-        elif item.type == "image_generation_call" and item.result:
-            img = base64.b64decode(item.result)
-            file_objs.append(await _save_tmp(img, f"gen_{len(file_objs)+1}.png"))
-
-    result_text = "\n\n".join(text_chunks) or "(No text)"
-
-    logger.debug("call_openai_api returning")
-    return result_text, file_objs
+    text = await openai_client(prompt)
+    return text, []
 
 # ───────────────── Voice Transcription / TTS ─────────────────
 
@@ -432,7 +353,7 @@ HELP_PAGES: list[tuple[str, str]] = [
                 "国旗リアクションで自動翻訳",
                 "",
                 "🤖 AI/ツール",
-                "/gpt <質問>, y? <質問> : ChatGPT（GPT-4.1）で質問や相談ができるAI回答",
+                "/gpt <質問>, y? <質問> : LLMで質問や相談ができるAI回答",
                 "",
                 "🧑 ユーザー情報",
                 "/user [ユーザー], y!user <@メンション|ID> : プロフィール表示",
@@ -485,7 +406,7 @@ HELP_PAGES: list[tuple[str, str]] = [
             [
                 "メッセージに国旗リアクションを付けるとその言語へ自動翻訳",
                 "　例: 🇺🇸 を押すと英語に翻訳、🇰🇷 なら韓国語に翻訳",
-                "GPT-4.1 が翻訳文を生成し返信します (2000文字制限あり)",
+                "LLM が翻訳文を生成し返信します (2000文字制限あり)",
             ]
         ),
     ),
@@ -493,7 +414,7 @@ HELP_PAGES: list[tuple[str, str]] = [
         "🤖 AI/ツール",
         "\n".join(
             [
-                "/gpt <質問>, y? <質問> : ChatGPT（GPT-4.1）へ質問",
+                "/gpt <質問>, y? <質問> : LLMへ質問",
                 "　例: /gpt Pythonとは？",
                 "/qr <text>, y!qr <text> : QRコード画像を生成",
                 "/barcode <text>, y!barcode <text> : Code128 バーコードを生成",
@@ -2086,28 +2007,16 @@ def trim_text(s: str, limit: int = DISCORD_TEXT_LIMIT):
 
 
 async def autofix_latex(expr: str, log: str) -> Optional[str]:
-    """GPT-4.1でLaTeX修正版を自動生成"""
+    """Generate a LaTeX fix using the local model."""
     try:
-        res = await openai_client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[
-                {"role": "system", "content": GPT_SYSTEM},
-                {"role": "user",
-                 "content": (
-                     f"Expression:\n{expr}\n\n"
-                     f"Error log:\n{log}\n\n"
-                     "Return only the fixed expression."
-                 )},
-            ],
-            temperature=0,
-        )
-        fixed = res.choices[0].message.content.strip()
-        # コードブロック排除
+        prompt = f"Fix LaTeX: {expr}\nError: {log}\nReturn only the fixed expression."
+        fixed = await openai_client(prompt)
+        fixed = fixed.strip()
         if fixed.startswith("```"):
             fixed = fixed.strip("` \n")
         return fixed or None
     except Exception as e:
-        print(f"GPT自動修正失敗: {e}")
+        print(f"LLM自動修正失敗: {e}")
         return None
 
 
@@ -3584,7 +3493,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if not original:
         return
 
-    # 5. GPT-4.1 で翻訳
+    # 5. LLM で翻訳
     async with channel.typing():
         try:
             prompt = (
@@ -3702,8 +3611,8 @@ async def start_bot():
     """Start the Discord bot."""
     if not TOKEN:
         raise RuntimeError("DISCORD_BOT_TOKEN is not set. Check your environment variables or .env file")
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not set. Check your environment variables or .env file")
+    if not OLLAMA_MODEL:
+        raise RuntimeError("OLLAMA_MODEL is not set. Check your environment variables or .env file")
     await client.start(TOKEN)
 
 

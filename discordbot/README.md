@@ -31,7 +31,7 @@ YoneRai is a multi purpose Discord bot that supports music playback, AI powered 
 ## Installation
 1. Install Python 3.11 or later.
 2. `pip install -r requirements.txt` to install dependencies.
-3. Copy `.env.example` to `.env` and fill in `DISCORD_BOT_TOKEN` and `OPENAI_API_KEY`.
+3. Copy `.env.example` to `.env` and set `DISCORD_BOT_TOKEN` and `OLLAMA_MODEL`.
 4. Install `ffmpeg` and run:
    ```bash
    python bot.py

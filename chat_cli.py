@@ -15,9 +15,9 @@ async def chat_once(agent: CappuccinoAgent, message: str) -> str:
     return result if isinstance(result, str) else str(result)
 
 
-async def chat_loop(api_key: Optional[str] = None) -> None:
+async def chat_loop(model: Optional[str] = None) -> None:
     """Interactive CLI chat loop with the Cappuccino agent."""
-    agent = CappuccinoAgent(api_key=api_key or settings.openai_api_key,
+    agent = CappuccinoAgent(model=model or settings.ollama_model,
                            tool_manager=ToolManager(db_path=":memory:"))
     try:
         while True:

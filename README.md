@@ -8,7 +8,7 @@ Cappuccino aims to be a general‑purpose AI assistant. The project follows the 
    ```bash
    pip install -r requirements.txt
    ```
-3. Copy `.env.example` to `.env` and add your API keys.
+3. Copy `.env.example` to `.env` and set `OLLAMA_MODEL` and `STABLE_DIFFUSION_MODEL` for your local models.
 
 ## Running the server
 Start the FastAPI server with:
@@ -67,7 +67,7 @@ python chat_cli.py
 Exit the session with `exit` or `quit`.
 
 ## API CLI
-Use `agent_cli.py` to send a prompt directly to the OpenAI API and save any
+Use `agent_cli.py` to send a prompt directly to the local LLM and save any
 generated images locally:
 
 ```bash
