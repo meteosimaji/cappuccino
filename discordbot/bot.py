@@ -27,14 +27,8 @@ import json
 from cappuccino_agent import CappuccinoAgent
 from openai import AsyncOpenAI
 from bs4 import BeautifulSoup
+from typing import Iterable, Union, Optional, Callable, Awaitable
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from PIL import Image  # noqa: E402
-
-from typing import Iterable, Union, Optional, Any, Tuple  # noqa: E402
 
 # 音声読み上げや文字起こし機能は削除したため関連ライブラリは不要
 from urllib.parse import urlparse, parse_qs, urlunparse  # noqa: E402
@@ -3685,6 +3679,35 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             logger.error("翻訳失敗: %s", e)
 
 
+# Map command names to handler functions
+COMMAND_HANDLERS: dict[str, Callable[[discord.Message, str], Awaitable[None]]] = {
+    "ping": lambda m, a: cmd_ping(m),
+    "say": cmd_say,
+    "date": cmd_date,
+    "user": cmd_user,
+    "dice": lambda m, a: cmd_dice(m, a or "1d100"),
+    "gpt": cmd_gpt,
+    "help": lambda m, a: cmd_help(m),
+    "play": lambda m, a: cmd_play(m, a, split_commas=True),
+    "queue": cmd_queue,
+    "remove": cmd_remove,
+    "keep": cmd_keep,
+    "seek": cmd_seek,
+    "rewind": cmd_rewind,
+    "forward": cmd_forward,
+    "server": lambda m, a: cmd_server(m),
+    "purge": cmd_purge,
+    "qr": cmd_qr,
+    "barcode": cmd_barcode,
+    "tex": cmd_tex,
+    "news": cmd_news,
+    "eew": cmd_eew,
+    "weather": cmd_weather,
+    "thread": cmd_thread,
+    "poker": cmd_poker,
+}
+
+
 @client.event
 async def on_message(msg: discord.Message):
     # ① Bot の発言は無視
@@ -3730,33 +3753,9 @@ async def on_message(msg: discord.Message):
 
     # ③ 既存コマンド解析
     cmd, arg = parse_cmd(msg.content)
-    if cmd == "ping":   await cmd_ping(msg)
-    elif cmd == "say":  await cmd_say(msg, arg)
-    elif cmd == "date": await cmd_date(msg, arg)
-    elif cmd == "user": await cmd_user(msg, arg)
-    elif cmd == "dice": await cmd_dice(msg, arg or "1d100")
-    elif cmd == "gpt":
-        await cmd_gpt(msg, arg)
-    elif cmd == "help": await cmd_help(msg)
-    elif cmd == "play": await cmd_play(msg, arg, split_commas=True)
-    elif cmd == "queue":await cmd_queue(msg, arg)
-    elif cmd == "remove":await cmd_remove(msg, arg)
-    elif cmd == "keep": await cmd_keep(msg, arg)
-    elif cmd == "seek": await cmd_seek(msg, arg)
-    elif cmd == "rewind": await cmd_rewind(msg, arg)
-    elif cmd == "forward": await cmd_forward(msg, arg)
-    elif cmd == "server": await cmd_server(msg)
-    elif cmd == "purge":await cmd_purge(msg, arg)
-    elif cmd == "qr": await cmd_qr(msg, arg)
-    elif cmd == "barcode": await cmd_barcode(msg, arg)
-    elif cmd == "tex": await cmd_tex(msg, arg)
-    elif cmd == "news": await cmd_news(msg, arg)
-    elif cmd == "eew": await cmd_eew(msg, arg)
-    elif cmd == "weather": await cmd_weather(msg, arg)
-    elif cmd == "thread": await cmd_thread(msg, arg)
-
-    elif cmd == "poker": await cmd_poker(msg, arg)
-
+    handler = COMMAND_HANDLERS.get(cmd)
+    if handler:
+        await handler(msg, arg)
     else:
         mention = client.user and any(m.id == client.user.id for m in msg.mentions)
         history = await _gather_reply_chain(msg)
