@@ -48,10 +48,66 @@ def log_tool(func):
     return wrapper
 
 
+class BrowserHelper:
+    """Asynchronous helper around Playwright for basic page operations."""
+
+    def __init__(self) -> None:
+        self.playwright = None
+        self.browser = None
+        self.page = None
+        self.console: list[str] = []
+
+    async def start(self) -> None:
+        from playwright.async_api import async_playwright
+
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(headless=True)
+        context = await self.browser.new_context()
+        self.page = await context.new_page()
+        self.page.on("console", lambda msg: self.console.append(msg.text))
+
+    async def close(self) -> None:
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
+
+    async def navigate(self, url: str) -> str:
+        await self.page.goto(url)
+        return await self.page.content()
+
+    async def click(self, selector: str) -> None:
+        await self.page.click(selector)
+
+    async def fill(self, selector: str, text: str) -> None:
+        await self.page.fill(selector, text)
+
+    async def move_mouse(self, x: int, y: int) -> None:
+        await self.page.mouse.move(x, y)
+
+    async def press_key(self, key: str) -> None:
+        await self.page.keyboard.press(key)
+
+    async def select_option(self, selector: str, option: str) -> None:
+        await self.page.select_option(selector, option)
+
+    async def save_image(self, selector: str, output_path: str) -> None:
+        element = await self.page.query_selector(selector)
+        if not element:
+            raise ValueError("element not found")
+        await element.screenshot(path=output_path)
+
+    async def scroll_by(self, amount: int) -> None:
+        await self.page.evaluate("window.scrollBy(0, arguments[0])", amount)
+
+    async def eval_js(self, script: str):
+        return await self.page.evaluate(script)
+
+
 class ToolManager:
     """Collection of asynchronous tools for the Cappuccino agent."""
 
-    def __init__(self, db_path: str = "agent_state.db", root_dir: Optional[str] = None):
+    def __init__(self, db_path: str = "agent_state.db", root_dir: Optional[str] = None, *, browser_helper: Optional[type] = None):
         self.db_path = db_path
         self.root_dir = os.path.abspath(root_dir) if root_dir else None
         self.db_connection: Optional[aiosqlite.Connection] = None
@@ -60,6 +116,8 @@ class ToolManager:
         self.browser_url: str = ""
         self.service_processes: Dict[int, Any] = {}
         self.state_manager = StateManager(db_path)
+        self._browser_helper_cls = browser_helper or BrowserHelper
+        self.browser: Optional[BrowserHelper] = None
 
     async def __aenter__(self) -> "ToolManager":
         """Open the database connection when entering the context."""
@@ -87,6 +145,9 @@ class ToolManager:
             await self.db_connection.close()
             self.db_connection = None
         await self.state_manager.close()
+        if self.browser:
+            await self.browser.close()
+            self.browser = None
 
     # ------------------------------------------------------------------
     # Path utilities
@@ -160,6 +221,12 @@ class ToolManager:
             (name, code),
         )
         await conn.commit()
+
+    async def _get_browser(self) -> BrowserHelper:
+        if self.browser is None:
+            self.browser = self._browser_helper_cls()
+            await self.browser.start()
+        return self.browser
 
     # ------------------------------------------------------------------
     # Result caching helpers
@@ -694,27 +761,23 @@ class ToolManager:
         return {"response": data}
 
     # ------------------------------------------------------------------
-    # Browser automation (placeholders)
+    # Browser automation using Playwright
     # ------------------------------------------------------------------
     @log_tool
     async def browser_navigate(self, url: str = "") -> Dict[str, Any]:
-
-        """Fetch a web page and store its contents for later viewing."""
-        import aiohttp
+        """Navigate an embedded headless browser to the given URL."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    self.browser_content = await resp.text()
-                    self.browser_url = str(resp.url)
+            browser = await self._get_browser()
+            self.browser_content = await browser.navigate(url)
+            self.browser_url = url
             return {"status": "success", "url": self.browser_url}
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - unexpected
             logging.error(f"browser_navigate error: {e}")
             return {"error": str(e)}
 
 
     @log_tool
     async def browser_view(self) -> Dict[str, Any]:
-
         """Return a preview of the last fetched page."""
         if not self.browser_content:
             return {"error": "no page loaded"}
@@ -724,44 +787,70 @@ class ToolManager:
     @log_tool
 
     async def browser_click(self, selector: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        await browser.click(selector)
+        self.browser_content = await browser.page.content()
+        return {"status": "clicked"}
 
     @log_tool
     async def browser_input(self, selector: str, text: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        await browser.fill(selector, text)
+        self.browser_content = await browser.page.content()
+        return {"status": "input"}
 
     @log_tool
     async def browser_move_mouse(self, x: int, y: int) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        await browser.move_mouse(x, y)
+        return {"status": "moved"}
 
     @log_tool
     async def browser_press_key(self, key: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        await browser.press_key(key)
+        self.browser_content = await browser.page.content()
+        return {"status": "pressed"}
 
     @log_tool
     async def browser_select_option(self, selector: str, option: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        await browser.select_option(selector, option)
+        self.browser_content = await browser.page.content()
+        return {"status": "selected"}
 
     @log_tool
     async def browser_save_image(self, selector: str, output_path: str) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        try:
+            browser = await self._get_browser()
+            await browser.save_image(selector, output_path)
+            return {"status": "saved", "path": output_path}
+        except Exception as e:
+            return {"error": str(e)}
 
     @log_tool
     async def browser_scroll_up(self, amount: int) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        await browser.scroll_by(-amount)
+        return {"status": "scrolled"}
 
     @log_tool
     async def browser_scroll_down(self, amount: int) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        await browser.scroll_by(amount)
+        return {"status": "scrolled"}
 
     @log_tool
     async def browser_console_exec(self, script: str) -> Dict[str, Any]:
-
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        result = await browser.eval_js(script)
+        self.browser_content = await browser.page.content()
+        return {"result": result}
 
     @log_tool
     async def browser_console_view(self) -> Dict[str, Any]:
-        return {"error": "browser automation not implemented"}
+        browser = await self._get_browser()
+        return {"messages": browser.console}
 
     # ------------------------------------------------------------------
     # Service deployment (placeholders)

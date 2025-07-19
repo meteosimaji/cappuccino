@@ -141,8 +141,11 @@ async def test_info_search(tm, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_browser_and_service_placeholders(tm):
+async def test_service_placeholders(tm):
     funcs = [
+        tm.service_expose_port,
+        tm.service_deploy_frontend,
+        tm.service_deploy_backend,
         tm.browser_navigate,
         tm.browser_view,
         tm.browser_click,

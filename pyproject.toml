@@ -19,6 +19,7 @@ dependencies = [
     "python-dotenv",
     "textblob",
     "httpx<0.28",
+    "playwright",
 ]
 
 [project.optional-dependencies]
