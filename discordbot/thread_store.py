@@ -1,6 +1,10 @@
 import shelve
 
-_DB = shelve.open("threads.db")
+try:
+    _DB = shelve.open("threads.db")
+except Exception:
+    # Fallback to an in-memory dict if the database cannot be opened
+    _DB = {}
 
 
 def get(channel_id: int) -> str | None:
@@ -9,6 +13,8 @@ def get(channel_id: int) -> str | None:
 
 def save(channel_id: int, thread_id: str):
     _DB[str(channel_id)] = thread_id
+    if hasattr(_DB, "sync"):
+        _DB.sync()
 
 
 def delete(channel_id: int) -> None:
@@ -16,6 +22,8 @@ def delete(channel_id: int) -> None:
     key = str(channel_id)
     if key in _DB:
         del _DB[key]
+        if hasattr(_DB, "sync"):
+            _DB.sync()
 
 
 def all_items() -> dict[str, str]:
