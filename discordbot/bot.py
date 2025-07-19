@@ -36,7 +36,6 @@ from dotenv import load_dotenv  # noqa: E402
 from logging_config import setup_logging  # noqa: E402
 
 from dataclasses import dataclass  # noqa: E402
-from . import thread_store  # noqa: E402
 
 from .poker import PokerMatch, PokerView  # noqa: E402
 
@@ -311,34 +310,6 @@ async def _gather_reply_chain(msg: discord.Message, limit: int | None = None) ->
     return chain
 
 
-async def _get_gpt_thread(msg: discord.Message) -> discord.abc.Messageable:
-    """Return thread for GPT replies, creating if needed."""
-    channel = msg.channel
-    if isinstance(channel, _SlashChannel):
-        channel = channel._channel
-    if isinstance(channel, discord.Thread):
-        return channel
-    parent = channel
-    if not isinstance(parent, discord.TextChannel):
-        return channel
-    thread_id = thread_store.get(parent.id)
-    thread: discord.Thread | None = None
-    if thread_id:
-        thread = parent.guild.get_thread(int(thread_id))
-        if thread is None:
-            try:
-                fetched = await parent.guild.fetch_channel(int(thread_id))
-                if isinstance(fetched, discord.Thread):
-                    thread = fetched
-            except Exception:
-                thread = None
-    if thread is None or thread.archived:
-        try:
-            thread = await msg.create_thread(name="GPT Thread")
-        except Exception:
-            thread = await parent.create_thread(name="GPT Thread")
-        thread_store.save(parent.id, str(thread.id))
-    return thread
 
 
 def _strip_bot_mention(text: str) -> str:
@@ -1628,9 +1599,7 @@ async def cmd_gpt(msg: discord.Message, user_text: str):
         "###Current message\n"
         f"{user_text}"
     )
-    thread = await _get_gpt_thread(msg)
-    prefix = f"{msg.author.mention} " if thread != msg.channel else ""
-    reply = await thread.send(prefix + "…")
+    reply = await msg.reply("…")
     try:
         # 履歴含めた添付画像を送る
         response_text, files = await call_openai_api(prompt, ctx=msg, files=all_attachments)
@@ -1638,7 +1607,7 @@ async def cmd_gpt(msg: discord.Message, user_text: str):
         await reply.edit(content=f"Error: {exc}")
         return
 
-    await reply.edit(content=prefix + response_text[:1900], attachments=files if files else [])
+    await reply.edit(content=response_text[:1900], attachments=files if files else [])
 # ──────────── 🎵  コマンド郡 ────────────
 
 async def cmd_play(msg: discord.Message, query: str = "", *, first_query: bool = False, split_commas: bool = False):
@@ -2469,35 +2438,6 @@ async def cmd_weather(msg: discord.Message, arg: str) -> None:
         await msg.channel.send(f"テスト送信に失敗: {e}")
 
 
-async def cmd_thread(msg: discord.Message, arg: str) -> None:
-    """Show or set GPT reply thread."""
-    channel = msg.channel
-    if isinstance(channel, discord.Thread):
-        parent_id = channel.parent_id
-        parent = channel.parent
-    elif isinstance(channel, discord.TextChannel):
-        parent_id = channel.id
-        parent = channel
-    else:
-        await msg.reply("テキストチャンネルで使ってね！")
-        return
-
-    action = arg.strip().lower()
-    if action == "here":
-        if isinstance(channel, discord.Thread):
-            thread_store.save(parent_id, str(channel.id))
-            await msg.reply(f"設定しました: <#{channel.id}>", allowed_mentions=discord.AllowedMentions.none())
-        else:
-            await msg.reply("スレッド内で実行してね！")
-    elif action in {"reset", "clear"}:
-        thread_store.delete(parent_id)
-        await msg.reply("設定をリセットしました")
-    else:
-        tid = thread_store.get(parent_id)
-        if tid:
-            await msg.reply(f"現在のスレッド: <#{tid}>", allowed_mentions=discord.AllowedMentions.none())
-        else:
-            await msg.reply("スレッドは設定されていません。スレッドで `y!thread here` と入力してね。")
 
 
 # ───────────────── ニュース自動送信（要約なし・APIゼロ版） ─────────────────
@@ -3116,17 +3056,6 @@ async def sc_weather(itx: discord.Interaction, channel: discord.TextChannel):
         await itx.followup.send(f"テスト送信に失敗: {e}")
 
 
-@tree.command(name="thread", description="GPT返信スレッドを設定/表示")
-@app_commands.describe(action="here または reset")
-async def sc_thread(itx: discord.Interaction, action: str | None = None):
-
-    try:
-        await itx.response.defer()
-        await cmd_thread(SlashMessage(itx), action or "")
-    except Exception as e:
-        await itx.followup.send(f"エラー発生: {e}")
-
-
 @tree.command(name="poker", description="BOTやプレイヤーとポーカーで遊ぶ")
 
 @app_commands.describe(opponent="対戦相手。省略するとBOT")
@@ -3703,7 +3632,6 @@ COMMAND_HANDLERS: dict[str, Callable[[discord.Message, str], Awaitable[None]]] =
     "news": cmd_news,
     "eew": cmd_eew,
     "weather": cmd_weather,
-    "thread": cmd_thread,
     "poker": cmd_poker,
 }
 
