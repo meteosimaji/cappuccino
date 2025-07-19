@@ -27,8 +27,8 @@ import json
 from cappuccino_agent import CappuccinoAgent
 from openai import AsyncOpenAI
 from bs4 import BeautifulSoup
-from typing import Iterable, Union, Optional, Callable, Awaitable
-
+from typing import Iterable, Union, Optional, Callable, Awaitable, Tuple
+from yt_dlp import YoutubeDL
 
 # 音声読み上げや文字起こし機能は削除したため関連ライブラリは不要
 from urllib.parse import urlparse, parse_qs, urlunparse  # noqa: E402
