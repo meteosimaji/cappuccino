@@ -26,6 +26,9 @@ import feedparser
 import json
 from cappuccino_agent import CappuccinoAgent
 from openai import AsyncOpenAI
+from PIL import Image
+import numpy as np
+import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
 from typing import Iterable, Union, Optional, Callable, Awaitable, Tuple
 from yt_dlp import YoutubeDL
