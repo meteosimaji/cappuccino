@@ -24,8 +24,6 @@ class ToolExecutionError(Exception):
 
 logger = logging.getLogger(__name__)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
 
 def log_tool(func):
     """Decorator to log tool execution with parameters and errors."""

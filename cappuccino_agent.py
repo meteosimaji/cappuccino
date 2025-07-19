@@ -14,7 +14,6 @@ from self_improver import SelfImprover
 from agents import PlannerAgent, ExecutorAgent, AnalyzerAgent
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class CappuccinoAgent:
