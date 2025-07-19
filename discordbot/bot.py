@@ -2,33 +2,49 @@ import os
 import re
 import time
 import random
-import discord
 import tempfile
 import logging
 import datetime
 import asyncio
 import base64
 import shutil
-from discord import app_commands
+import mimetypes
+import pathlib
+import collections
+
+import discord
 import discord.ext.commands
-from cappuccino_agent import CappuccinoAgent
-import json
-import feedparser
+from discord import (
+    Activity,
+    ActivityType,
+    Status,
+    app_commands,
+)
+
 import aiohttp
+import feedparser
+import json
+from cappuccino_agent import CappuccinoAgent
 from openai import AsyncOpenAI
 from bs4 import BeautifulSoup
-from typing import Iterable, Union, Optional
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+from PIL import Image  # noqa: E402
+
+from typing import Iterable, Union, Optional, Any, Tuple  # noqa: E402
 
 # 音声読み上げや文字起こし機能は削除したため関連ライブラリは不要
-from urllib.parse import urlparse, parse_qs, urlunparse
-from dotenv import load_dotenv
-from logging_config import setup_logging
+from urllib.parse import urlparse, parse_qs, urlunparse  # noqa: E402
+from dotenv import load_dotenv  # noqa: E402
+from logging_config import setup_logging  # noqa: E402
 
-from dataclasses import dataclass
-from typing import Any
-from . import thread_store
+from dataclasses import dataclass  # noqa: E402
+from . import thread_store  # noqa: E402
 
-from .poker import PokerMatch, PokerView
+from .poker import PokerMatch, PokerView  # noqa: E402
 
 
 # ───────────────── TOKEN / KEY ─────────────────
@@ -128,15 +144,6 @@ cappuccino_agent = CappuccinoAgent(api_key=OPENAI_API_KEY)
 
 # Direct OpenAI client for bot commands
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-
-import aiohttp
-import mimetypes
-import discord
-import tempfile
-import pathlib
-import base64
-import os
-from typing import Optional, Iterable, Union
 
 def _guess_mime(fname: str) -> str:
     mime, _ = mimetypes.guess_type(fname)
@@ -396,7 +403,6 @@ class SlashMessage:
         await self.channel.send(emoji)
 
 
-from yt_dlp import YoutubeDL
 YTDL_OPTS = {
     "quiet": True,
     "format": "bestaudio[ext=m4a]/bestaudio/best",
@@ -707,7 +713,6 @@ def parse_message_link(link: str) -> tuple[int, int, int] | None:
         return None
     return int(m.group(1)), int(m.group(2)), int(m.group(3))
     
-import collections
 
 def fmt_time(sec: int) -> str:
     m, s = divmod(int(sec), 60)
@@ -910,8 +915,6 @@ async def progress_updater(state: "MusicState"):
         pass
 
 # ──────────── 🖼 名言化 APIヘルパ ────────────
-import pathlib
-
 FAKEQUOTE_URL = "https://api.voids.top/fakequote"
 
 async def make_quote_image(user, text, color=False) -> pathlib.Path:
@@ -1583,8 +1586,6 @@ async def cmd_dice(msg: discord.Message, nota: str):
 
     await msg.channel.send(f"🎲 {nota} → {txt} 【合計 {total}】", view=Reroll())
 
-import asyncio
-
 
 async def cmd_gpt(msg: discord.Message, user_text: str):
     if not user_text.strip():
@@ -2103,25 +2104,6 @@ async def cmd_barcode(msg: discord.Message, text: str) -> None:
         except Exception:
             pass
 
-import os
-import shutil
-import tempfile
-import asyncio
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from PIL import Image
-import numpy as np
-from typing import Optional, Tuple
-
-import discord  # 追加：DiscordのView/ボタン用
-
-# 新OpenAI API (v1.x)
-from openai import AsyncOpenAI
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-
 GPT_SYSTEM = (
     "You are a helpful LaTeX assistant. "
     "Given a LaTeX math expression and its compilation error log, "
@@ -2524,10 +2506,7 @@ async def cmd_thread(msg: discord.Message, arg: str) -> None:
 
 
 # ───────────────── ニュース自動送信（要約なし・APIゼロ版） ─────────────────
-import os, json, datetime, asyncio, logging, re, aiohttp, feedparser
-from urllib.parse import urlparse, urlunparse, parse_qs
-from bs4 import BeautifulSoup
-import discord
+
 
 # --------------- 設定 ---------------
 NEWS_FEED_URL   = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja"
@@ -2940,7 +2919,6 @@ async def scheduled_weather() -> None:
 
 
 # ───────────────── イベント ─────────────────
-from discord import Activity, ActivityType, Status
 
 # 起動時に 1 回設定
 @client.event
