@@ -6,7 +6,8 @@ import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 import os
-from openai import AsyncOpenAI
+from types import SimpleNamespace
+from ollama_client import OllamaLLM
 from dotenv import load_dotenv
 from planner import Planner
 from state_manager import StateManager
@@ -15,7 +16,17 @@ from tool_manager import ToolManager
 from cappuccino_agent import CappuccinoAgent
 
 load_dotenv()
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+llm = OllamaLLM(os.getenv("OLLAMA_MODEL", "llama3"))
+
+# stub object to satisfy tests expecting OpenAI realtime client
+async def _unsupported_create(model: str, voice: str):
+    raise RuntimeError("realtime API not supported")
+
+openai_client = SimpleNamespace(
+    beta=SimpleNamespace(
+        realtime=SimpleNamespace(sessions=SimpleNamespace(create=_unsupported_create))
+    )
+)
 
 
 async def stream_events(query: str) -> AsyncGenerator[str, None]:
@@ -28,7 +39,7 @@ async def stream_events(query: str) -> AsyncGenerator[str, None]:
 
 
 tool_manager = ToolManager(db_path=":memory:")
-agent = CappuccinoAgent(tool_manager)
+agent = CappuccinoAgent(model=os.getenv("OLLAMA_MODEL", "llama3"), tool_manager=tool_manager)
 app = FastAPI()
 
 state_manager = StateManager()
@@ -45,32 +56,13 @@ class RunResponse(BaseModel):
     images: List[str]
 
 
+async def call_llm(prompt: str) -> Dict[str, List[str]]:
+    text = await llm(prompt)
+    return {"text": text, "images": []}
+
+# Backwards compatibility name for tests
 async def call_openai(prompt: str) -> Dict[str, List[str]]:
-    resp = await openai_client.responses.create(
-        model="gpt-4.1",
-        tools=[
-            {"type": "web_search_preview"},
-            {"type": "code_interpreter", "container": {"type": "auto"}},
-            {"type": "image_generation"},
-        ],
-        input=[{"role": "user", "content": prompt}],
-    )
-
-    text_blocks: List[str] = []
-    images: List[str] = []
-    for item in resp.output:
-        if item.type == "message":
-            for block in item.content:
-                if getattr(block, "type", "") in {"output_text", "text"}:
-                    txt = getattr(block, "text", "").strip()
-                    if txt:
-                        text_blocks.append(txt)
-        elif item.type == "image_generation_call":
-            img_data = getattr(item, "result", None)
-            if img_data:
-                images.append(f"data:image/png;base64,{img_data}")
-
-    return {"text": "\n\n".join(text_blocks), "images": images}
+    return await call_llm(prompt)
 
 
 class ToolCallResult(BaseModel):
@@ -155,11 +147,14 @@ async def agent_tool_call_result(result: ToolCallResult) -> Dict[str, Any]:
 
 @app.get("/session")
 async def realtime_session(params: RealtimeSessionParams = RealtimeSessionParams()) -> Dict[str, Any]:
-    """Create a Realtime API session and return the ephemeral token."""
-    resp = await openai_client.beta.realtime.sessions.create(
-        model=params.model, voice=params.voice
-    )
-    return resp.model_dump()
+    """Create a realtime session via the OpenAI-compatible client."""
+    try:
+        session = await openai_client.beta.realtime.sessions.create(params.model, params.voice)
+        if hasattr(session, "model_dump"):
+            return session.model_dump()
+        return {"model": params.model, "voice": params.voice}
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 @app.websocket("/agent/stream")

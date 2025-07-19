@@ -2,7 +2,7 @@ aiosqlite
 aiohttp
 Pillow
 beautifulsoup4
-openai
+ollama
 discord.py==2.5.2
 yt-dlp==2025.6.25
 discord-ext-voice-recv==0.5.2a179
@@ -26,3 +26,5 @@ httpx<0.28
 playwright
 uvicorn
 httpx<0.28
+diffusers
+torch

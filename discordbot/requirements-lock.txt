@@ -43,7 +43,7 @@ mypy_extensions==1.1.0
 nodeenv==1.9.1
 numpy==2.3.1
 onnxruntime==1.22.0
-openai==1.93.0
+ollama==0.5.1
 packaging==25.0
 pathspec==0.12.1
 pillow==11.2.1

@@ -4,7 +4,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 import subprocess
 
 import pytest
-import openai
+import ollama_client
 from tool_manager import ToolManager
 
 class DummyMessage:
@@ -28,10 +28,10 @@ class DummyClient:
 
 @pytest.mark.asyncio
 async def test_generate_tool_from_failure(monkeypatch):
-    monkeypatch.setattr(openai, 'AsyncOpenAI', lambda api_key=None: DummyClient)
+    monkeypatch.setattr(ollama_client, 'OllamaLLM', lambda model, host=None: DummyClient)
     monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, b'', b''))
     tm = ToolManager(db_path=':memory:')
-    res = await tm.generate_tool_from_failure('increment', 'tool missing', api_key='test')
+    res = await tm.generate_tool_from_failure('increment', 'tool missing', model='test')
     assert res['name'] == 'auto_tool'
     assert hasattr(tm, 'auto_tool')
     out = await getattr(tm, 'auto_tool')(1)

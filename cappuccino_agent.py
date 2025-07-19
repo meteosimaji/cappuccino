@@ -6,7 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from typing import Any, Dict, List, Optional, AsyncGenerator
 
-from openai import AsyncOpenAI
+from ollama_client import OllamaLLM
 
 from tool_manager import ToolManager
 from state_manager import StateManager
@@ -21,7 +21,7 @@ class CappuccinoAgent:
 
     def __init__(
         self,
-        api_key: str | None = None,
+        model: str | None = None,
         db_path: str | None = None,
 
         tool_manager: Optional[ToolManager] = None,
@@ -30,13 +30,17 @@ class CappuccinoAgent:
         thread_workers: Optional[int] = None,
         process_workers: Optional[int] = None,
     ) -> None:
-        self.client = AsyncOpenAI(api_key=api_key) if api_key and llm is None else None
-        self.llm = llm
-        self.api_key = api_key
+        if llm is not None:
+            self.client = llm
+        elif model:
+            self.client = OllamaLLM(model)
+        else:
+            self.client = None
+        self.llm = self.client  # backward compatibility
 
         self.tool_manager = tool_manager or ToolManager(db_path or "agent_state.db")
         self.planner_agent = PlannerAgent()
-        self.executor_agent = ExecutorAgent(self.tool_manager, llm)
+        self.executor_agent = ExecutorAgent(self.tool_manager, self.client)
         self.analyzer_agent = AnalyzerAgent()
         self.messages: List[Dict[str, Any]] = []
         self.task_plan: List[Dict[str, Any]] = []
@@ -52,14 +56,14 @@ class CappuccinoAgent:
             else None
         )
         self.state_manager = StateManager(db_path or "agent_state.db")
-        self.self_improver = SelfImprover(self.state_manager, self.tool_manager, api_key)
+        self.self_improver = SelfImprover(self.state_manager, self.tool_manager, model)
         self._initialize_system_prompt()
 
     @classmethod
     async def create(
         cls,
         db_path: str,
-        api_key: str | None = None,
+        model: str | None = None,
         *,
         llm: Optional[Any] = None,
         tool_manager: Optional[ToolManager] = None,
@@ -68,7 +72,7 @@ class CappuccinoAgent:
     ) -> "CappuccinoAgent":
         """Instantiate agent and load state from the given database."""
         self = cls(
-            api_key=api_key,
+            model=model,
             db_path=db_path,
             llm=llm,
             tool_manager=tool_manager,
@@ -146,26 +150,18 @@ class CappuccinoAgent:
         emotion = detect_emotion(prompt)
         prompt_with_emotion = f"{prompt}\n[User sentiment: {emotion}]"
 
-        if self.llm:
-            resp = await self.llm(prompt_with_emotion)
-            result = (
-                resp
-                if isinstance(resp, str)
-                else resp.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
-        elif self.client:
-            try:
-                response = await self.client.chat.completions.create(
-                    model="gpt-4.1",
-                    messages=[{"role": "user", "content": prompt_with_emotion}],
-                )
-                result = response.choices[0].message.content or ""
-            except Exception as exc:
-                raise RuntimeError(f"LLM request failed: {exc}")
-        else:
+        if not self.client:
             raise RuntimeError("No LLM client configured")
+
+        if hasattr(self.client, "chat"):
+            resp = await self.client.chat.completions.create(
+                model=getattr(self.client, "model", "model"),
+                messages=[{"role": "user", "content": prompt_with_emotion}],
+            )
+            result = resp.choices[0].message.content or ""
+        else:
+            resp = await self.client(prompt_with_emotion)
+            result = resp if isinstance(resp, str) else str(resp)
 
         await self.set_cached_result(cache_key, result)
         return result
@@ -175,24 +171,18 @@ class CappuccinoAgent:
         prompt: str,
         tools_schema: List[Dict[str, Any]],
     ) -> str:
-        """Call the LLM using built-in tools via the Responses API if available."""
-
-        messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
-
+        """Call the LLM and return its response."""
         if not self.client:
             raise RuntimeError("No LLM client configured")
 
-        if hasattr(self.client, "responses"):
-            # New Responses API with built-in tools
-            try:
-                first = await self.client.responses.create(
-                    model="gpt-4.1",
-                    input=messages,
-                    tools=tools_schema,
-                )
-            except Exception as exc:
-                raise RuntimeError(f"LLM request failed: {exc}")
+        messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
 
+        if hasattr(self.client, "responses"):
+            first = await self.client.responses.create(
+                model=getattr(self.client, "model", "model"),
+                input=messages,
+                tools=tools_schema,
+            )
             for item in getattr(first, "output", []):
                 if getattr(item, "type", "") == "function_call":
                     func_name = getattr(item, "name", "")
@@ -205,7 +195,6 @@ class CappuccinoAgent:
                         result = await func(**args)
                     else:
                         result = {"error": f"tool {func_name} not found"}
-
                     messages.append(
                         {
                             "role": "tool",
@@ -214,58 +203,51 @@ class CappuccinoAgent:
                         }
                     )
 
-            try:
-                followup = await self.client.responses.create(
-                    model="gpt-4.1",
-                    input=messages,
-                )
-            except Exception as exc:
-                raise RuntimeError(f"LLM request failed: {exc}")
-
+            followup = await self.client.responses.create(
+                model=getattr(self.client, "model", "model"),
+                input=messages,
+            )
             for out in getattr(followup, "output", []):
                 if getattr(out, "type", "") == "text":
                     return getattr(out, "text", "")
             return ""
 
-        # Fallback to Chat Completions function-calling
-        try:
+        if hasattr(self.client, "chat"):
             response = await self.client.chat.completions.create(
-                model="gpt-4.1",
+                model=getattr(self.client, "model", "model"),
                 messages=messages,
                 tools=tools_schema,
             )
-        except Exception as exc:
-            raise RuntimeError(f"LLM request failed: {exc}")
+            message = response.choices[0].message
+            if getattr(message, "tool_calls", None):
+                for tool_call in message.tool_calls:
+                    func_name = tool_call.function.name
+                    try:
+                        args = json.loads(tool_call.function.arguments or "{}")
+                    except Exception:
+                        args = {}
+                    if hasattr(self.tool_manager, func_name):
+                        func = getattr(self.tool_manager, func_name)
+                        result = await func(**args)
+                    else:
+                        result = {"error": f"tool {func_name} not found"}
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(result),
+                        }
+                    )
 
-        message = response.choices[0].message
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                func_name = tool_call.function.name
-                try:
-                    args = json.loads(tool_call.function.arguments or "{}")
-                except Exception:
-                    args = {}
-                if hasattr(self.tool_manager, func_name):
-                    func = getattr(self.tool_manager, func_name)
-                    result = await func(**args)
-                else:
-                    result = {"error": f"tool {func_name} not found"}
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(result),
-                    }
+                followup = await self.client.chat.completions.create(
+                    model=getattr(self.client, "model", "model"),
+                    messages=messages,
                 )
+                return followup.choices[0].message.content or ""
+            return message.content or ""
 
-            followup = await self.client.chat.completions.create(
-                model="gpt-4.1",
-                messages=messages,
-            )
-            return followup.choices[0].message.content or ""
-
-        return message.content or ""
+        resp = await self.client(prompt)
+        return resp if isinstance(resp, str) else str(resp)
 
     async def _add_message(
         self,

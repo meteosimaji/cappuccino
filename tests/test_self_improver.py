@@ -3,7 +3,7 @@ import pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import pytest
-import openai
+import ollama_client
 
 from self_improver import SelfImprover
 from tool_manager import ToolManager
@@ -35,7 +35,7 @@ class DummyClient:
 
 @pytest.mark.asyncio
 async def test_self_improver_generates_tool(monkeypatch, tmp_path):
-    monkeypatch.setattr(openai, 'AsyncOpenAI', lambda api_key=None: DummyClient)
+    monkeypatch.setattr(ollama_client, 'OllamaLLM', lambda model, host=None: DummyClient)
     db = tmp_path / "state.db"
     state = StateManager(db_path=str(db))
     tm = ToolManager(db_path=str(db))
@@ -46,7 +46,7 @@ async def test_self_improver_generates_tool(monkeypatch, tmp_path):
     ]
     await state.save([], history, 0)
 
-    improver = SelfImprover(state, tm, api_key='k')
+    improver = SelfImprover(state, tm, model='k')
     res = await improver.improve()
     assert res['name'] == 'auto_tool'
     assert hasattr(tm, 'auto_tool')

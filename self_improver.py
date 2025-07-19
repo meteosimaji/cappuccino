@@ -9,10 +9,10 @@ from tool_manager import ToolManager
 class SelfImprover:
     """Analyze history and generate new tools based on failures."""
 
-    def __init__(self, state_manager: StateManager, tool_manager: ToolManager, api_key: Optional[str] = None) -> None:
+    def __init__(self, state_manager: StateManager, tool_manager: ToolManager, model: Optional[str] = None) -> None:
         self.state_manager = state_manager
         self.tool_manager = tool_manager
-        self.api_key = api_key
+        self.model = model
 
     async def _get_latest_failure(self) -> Optional[Tuple[str, str]]:
         """Return the latest user task and error message if present."""
@@ -31,13 +31,13 @@ class SelfImprover:
 
     async def improve(self) -> Optional[Dict[str, Any]]:
         """Attempt to generate a new tool from the latest failure."""
-        if not self.api_key:
+        if not self.model:
             return None
         failure = await self._get_latest_failure()
         if not failure:
             return None
         task_description, error_message = failure
         return await self.tool_manager.generate_tool_from_failure(
-            task_description, error_message, self.api_key
+            task_description, error_message, self.model
         )
 

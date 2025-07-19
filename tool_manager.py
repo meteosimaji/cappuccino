@@ -504,19 +504,34 @@ class ToolManager:
     # ------------------------------------------------------------------
     @log_tool
     async def media_generate_image(self, text: str, output_path: str) -> Dict[str, Any]:
-        """Generate a simple image with text."""
+        """Generate an image using Stable Diffusion if available."""
         try:
             output_path = self._validate_path(output_path)
         except ValueError as e:
             return {"error": str(e)}
 
-        def _generate() -> None:
+        async def _generate_sd() -> None:
+            model_id = os.getenv("STABLE_DIFFUSION_MODEL")
+            if not model_id:
+                raise RuntimeError("model not configured")
+            from diffusers import StableDiffusionPipeline  # type: ignore
+            import torch  # type: ignore
+
+            pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+            image = pipe(text).images[0]
+            image.save(output_path)
+
+        async def _generate_placeholder() -> None:
             img = Image.new("RGB", (400, 200), color="white")
             draw = ImageDraw.Draw(img)
             draw.text((10, 90), text, fill="black")
             img.save(output_path)
 
-        await asyncio.to_thread(_generate)
+        try:
+            await _generate_sd()
+        except Exception:
+            await _generate_placeholder()
+
         return {"path": output_path}
 
     @log_tool
@@ -945,7 +960,7 @@ class ToolManager:
         self,
         task_description: str,
         error_message: str,
-        api_key: str,
+        model: str,
     ) -> Dict[str, Any]:
         """Analyze a failed task and create a new tool via LLM.
 
@@ -954,7 +969,7 @@ class ToolManager:
         to this instance.
         """
 
-        from openai import AsyncOpenAI
+        from ollama_client import OllamaLLM
 
         # gather recent user comments for additional context
         conn = await self._get_db_connection()
@@ -973,13 +988,16 @@ class ToolManager:
             "Provide only the function code."
         )
 
-        client = AsyncOpenAI(api_key=api_key)
-        response = await client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-        )
-        raw_code = textwrap.dedent(response.choices[0].message.content or "")
+        llm = OllamaLLM(model)
+        if hasattr(llm, "chat"):
+            resp = await llm.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw_code = resp.choices[0].message.content
+        else:
+            raw_code = await llm(prompt)
+        raw_code = textwrap.dedent(raw_code)
         lines = raw_code.splitlines()
         if len(lines) > 1 and not lines[1].startswith(" "):
             lines[1:] = ["    " + line for line in lines[1:]]

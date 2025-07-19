@@ -3,47 +3,24 @@ import asyncio
 import base64
 import io
 import os
-from openai import AsyncOpenAI
 from dotenv import load_dotenv
+from ollama_client import OllamaLLM
 from PIL import Image
 
 load_dotenv()
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+client = OllamaLLM(os.getenv("OLLAMA_MODEL", "llama3"))
 
 
-async def call_openai(prompt: str) -> dict[str, list[str]]:
-    """Send a prompt directly to OpenAI and return text and images."""
-    resp = await client.responses.create(
-        model="gpt-4.1",
-        tools=[
-            {"type": "web_search_preview"},
-            {"type": "code_interpreter", "container": {"type": "auto"}},
-            {"type": "image_generation"},
-        ],
-        input=[{"role": "user", "content": prompt}],
-    )
-
-    text_blocks: list[str] = []
-    images: list[str] = []
-    for item in resp.output:
-        if item.type == "message":
-            for block in item.content:
-                if getattr(block, "type", "") in {"output_text", "text"}:
-                    txt = getattr(block, "text", "").strip()
-                    if txt:
-                        text_blocks.append(txt)
-        elif item.type == "image_generation_call":
-            img_data = getattr(item, "result", None)
-            if img_data:
-                images.append(f"data:image/png;base64,{img_data}")
-
-    return {"text": "\n\n".join(text_blocks), "images": images}
+async def call_llm(prompt: str) -> dict[str, list[str]]:
+    """Send a prompt directly to the local LLM."""
+    text = await client(prompt)
+    return {"text": text, "images": []}
 
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     query = sys.argv[1] if len(sys.argv) > 1 else input("Query: ")
-    result = asyncio.run(call_openai(query))
+    result = asyncio.run(call_llm(query))
 
     text_output = result.get("text", "")
     if text_output:
